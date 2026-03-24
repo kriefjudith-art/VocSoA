@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Pitch Bird Trajectory</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: sans-serif;
+        }
+        #controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        #info {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #aaaaaa;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h2>Pitch Contour Bird</h2>
+        <button id="startButton">Start Microphone</button>
+        <div id="info">Pitch: -- Hz</div>
+    </div>
+    
+    <canvas id="visualizer" width="800" height="400"></canvas>
+
+    <script>
+        const startButton = document.getElementById('startButton');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const infoDiv = document.getElementById('info');
+
+        let audioContext;
+        let analyser;
+        let microphone;
+        
+        // Bird and trajectory state
+        let bird = { x: 50, y: canvas.height / 2 };
+        let targetY = canvas.height / 2;
+        let trajectoryPath = [];
+
+        // Pitch boundaries for mapping (adjust these based on your vocal range)
+        const MIN_PITCH = 80;  // Lower pitch (bottom of canvas)
+        const MAX_PITCH = 600; // Higher pitch (top of canvas)
+
+        startButton.addEventListener('click', async () => {
+            if (audioContext) return; 
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048; 
+                
+                microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+
+                startButton.innerText = "Microphone Active";
+                startButton.style.backgroundColor = "#28a745";
+                
+                drawLoop();
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone. Please check permissions.');
+            }
+        });
+
+        // Auto-correlation algorithm to find fundamental frequency
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let rms = 0;
+
+            for (let i = 0; i < SIZE; i++) {
+                rms += buf[i] * buf[i];
+            }
+            rms = Math.sqrt(rms / SIZE);
+
+            if (rms < 0.015) return -1; // Silence threshold
+
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++)
+                if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+            for (let i = 1; i < SIZE / 2; i++)
+                if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+            buf = buf.slice(r1, r2);
+            SIZE = buf.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++)
+                for (let j = 0; j < SIZE - i; j++)
+                    c[i] = c[i] + buf[j] * buf[j + i];
+
+            let d = 0; while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            let T0 = maxpos;
+
+            let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+            let a = (x1 + x3 - 2 * x2) / 2;
+            let b = (x3 - x1) / 2;
+            if (a) T0 = T0 - b / (2 * a);
+
+            return sampleRate / T0;
+        }
+
+        function drawLoop() {
+            requestAnimationFrame(drawLoop);
+
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            const pitch = autoCorrelate(buffer, audioContext.sampleRate);
+
+            if (pitch !== -1) {
+                // 1. Advance the bird slowly on the X axis when vocalizing
+                bird.x += 3; 
+
+                // 2. Map the pitch to the Y axis. 
+                // Canvas Y=0 is the top, so high pitch needs a low Y value.
+                let normalizedPitch = (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+                // Clamp between 0 and 1 so it doesn't fly off screen
+                normalizedPitch = Math.max(0, Math.min(1, normalizedPitch)); 
+                
+                // Invert the Y axis so high pitch = up
+                targetY = canvas.height - (normalizedPitch * canvas.height);
+                
+                infoDiv.innerText = `Pitch: ${Math.round(pitch)} Hz`;
+
+                // Store position for the trajectory line
+                trajectoryPath.push({ x: bird.x, y: bird.y });
+            } else {
+                infoDiv.innerText = `Pitch: -- Hz`;
+            }
+
+            // Smooth the vertical movement
+            bird.y += (targetY - bird.y) * 0.1;
+
+            // Wrap around to the left side if the bird flies off the right edge
+            if (bird.x > canvas.width) {
+                bird.x = 0;
+                trajectoryPath = []; // Clear the line when wrapping
+            }
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the trajectory line
+            if (trajectoryPath.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(trajectoryPath[0].x, trajectoryPath[0].y);
+                for (let i = 1; i < trajectoryPath.length; i++) {
+                    ctx.lineTo(trajectoryPath[i].x, trajectoryPath[i].y);
+                }
+                ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+            }
+
+            // Draw the bird (using text/emoji)
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🐦', bird.x, bird.y);
+        }
+    </script>
+</body>
+</html>

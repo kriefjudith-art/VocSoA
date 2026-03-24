@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baby Pitch Agency Experiment - Harmonicity Control</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #87CEEB; /* Clean sky blue */
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            overflow: hidden;
+        }
+        #ui-container {
+            position: absolute;
+            z-index: 10;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #FF4500;
+            margin-top: 0;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            background-color: #FF1493; /* Hot pink */
+            color: white;
+            border: none;
+            border-radius: 50px;
+            transition: transform 0.2s;
+            box-shadow: 0 6px 0 #C71585;
+        }
+        button:active {
+            transform: translateY(6px);
+            box-shadow: 0 0 0 #C71585;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h1>🐥 Pitch & Harmonicity Focus</h1>
+        <p>Pure pitch control. No volume dependency.</p>
+        <button id="startButton">Start Microphone</button>
+    </div>
+    
+    <canvas id="visualizer"></canvas>
+
+    <script>
+        const startButton = document.getElementById('startButton');
+        const uiContainer = document.getElementById('ui-container');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let audioContext, analyser, microphone;
+        
+        // --- SETTINGS ---
+        const MIN_PITCH = 150; 
+        const MAX_PITCH = 800; 
+        const HARMONICITY_THRESHOLD = 0.8; // 1.0 is perfect pitch. 0.8 requires a clear voice.
+        
+        let bird = { x: 100, y: canvas.height / 2, angle: 0 };
+        let targetY = canvas.height / 2;
+        let trajectoryPath = [];
+
+        startButton.addEventListener('click', async () => {
+            if (audioContext) return; 
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, echoCancellation: false });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048; 
+                
+                microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+
+                uiContainer.style.display = 'none';
+                
+                drawLoop();
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone.');
+            }
+        });
+
+        // Advanced Auto-correlation yielding Pitch AND Harmonicity
+        function getPitchAndHarmonicity(buf, sampleRate) {
+            let SIZE = buf.length;
+            let c = new Array(SIZE).fill(0);
+
+            // Compute autocorrelation
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) {
+                    c[i] += buf[j] * buf[j + i];
+                }
+            }
+
+            // c[0] represents total energy. If it's exactly 0, there is digital silence.
+            if (c[0] === 0) return { pitch: -1, harmonicity: 0 };
+
+            // Find the first valley to skip the zero-lag peak
+            let d = 0; 
+            while (c[d] > c[d + 1]) d++;
+
+            // Find the highest peak after the zero-lag
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) { 
+                    maxval = c[i]; 
+                    maxpos = i; 
+                }
+            }
+
+            // Calculate Harmonicity (Ratio of the periodic peak to total energy)
+            let harmonicity = maxval / c[0];
+
+            let T0 = maxpos;
+
+            // Interpolation for more precise pitch
+            let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+            let a = (x1 + x3 - 2 * x2) / 2;
+            let b = (x3 - x1) / 2;
+            if (a) T0 = T0 - b / (2 * a);
+
+            return { pitch: sampleRate / T0, harmonicity: harmonicity };
+        }
+
+        function drawLoop() {
+            requestAnimationFrame(drawLoop);
+
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            
+            // Get both pitch and harmonicity ratio
+            const result = getPitchAndHarmonicity(buffer, audioContext.sampleRate);
+            
+            let isVocalizing = false;
+
+            // Trigger ONLY if the sound is highly periodic (a clear pitched voice)
+            // Loud noises (clapping, breathing) will have low harmonicity and be ignored.
+            if (result.harmonicity > HARMONICITY_THRESHOLD && result.pitch > MIN_PITCH && result.pitch < MAX_PITCH) {
+                isVocalizing = true;
+                
+                // Move bird forward
+                bird.x += 4; 
+
+                // Map pitch to Y axis
+                let normalizedPitch = (result.pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+                normalizedPitch = Math.max(0.1, Math.min(0.9, normalizedPitch)); 
+                
+                targetY = canvas.height - (normalizedPitch * canvas.height);
+                trajectoryPath.push({ x: bird.x, y: bird.y });
+            }
+
+            // Smooth vertical movement
+            let dy = targetY - bird.y;
+            bird.y += dy * 0.15;
+
+            // Tilt mechanics
+            let targetAngle = isVocalizing ? (dy * 0.01) : 0;
+            bird.angle += (targetAngle - bird.angle) * 0.2;
+
+            // Screen wrapping
+            if (bird.x > canvas.width + 50) {
+                bird.x = 0;
+                trajectoryPath = []; 
+            }
+
+            // --- PURE DRAWING ---
+            
+            // Clean Sky Background
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Trajectory line
+            if (trajectoryPath.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(trajectoryPath[0].x, trajectoryPath[0].y);
+                for (let i = 1; i < trajectoryPath.length; i++) {
+                    ctx.lineTo(trajectoryPath[i].x, trajectoryPath[i].y);
+                }
+                ctx.strokeStyle = '#FF1493'; // Hot Pink
+                ctx.lineWidth = 12;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+                
+                ctx.strokeStyle = '#FFFFFF'; 
+                ctx.lineWidth = 4;
+                ctx.stroke();
+            }
+
+            // The Baby Bird
+            ctx.save();
+            ctx.translate(bird.x, bird.y);
+            ctx.rotate(bird.angle);
+            ctx.font = '100px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🐥', 0, 0);
+            ctx.restore();
+        }
+    </script>
+</body>
+</html>

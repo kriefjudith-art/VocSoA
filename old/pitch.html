@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Pitch Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: sans-serif;
+        }
+        #controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        #info {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #aaaaaa;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h2>Pitch Visualizer</h2>
+        <button id="startButton">Start Microphone</button>
+        <div id="info">Pitch: -- Hz</div>
+    </div>
+    
+    <canvas id="visualizer" width="600" height="400"></canvas>
+
+    <script>
+        const startButton = document.getElementById('startButton');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const infoDiv = document.getElementById('info');
+
+        let audioContext;
+        let analyser;
+        let microphone;
+        
+        // We use lerping (linear interpolation) to make the circle size transition smooth
+        let currentRadius = 10;
+        let targetRadius = 10;
+
+        startButton.addEventListener('click', async () => {
+            if (audioContext) return; // Already started
+
+            try {
+                // Request microphone access
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Initialize Web Audio API
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048; // Buffer size for pitch detection
+                
+                microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+
+                startButton.innerText = "Microphone Active";
+                startButton.style.backgroundColor = "#28a745";
+                
+                // Start drawing loop
+                drawLoop();
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone. Please check permissions.');
+            }
+        });
+
+        // Auto-correlation algorithm to find fundamental frequency (pitch)
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let rms = 0;
+
+            // Calculate Root Mean Square (RMS) to measure volume
+            for (let i = 0; i < SIZE; i++) {
+                rms += buf[i] * buf[i];
+            }
+            rms = Math.sqrt(rms / SIZE);
+
+            // If the volume is too low, we assume silence
+            if (rms < 0.01) return -1;
+
+            // Find a range in the buffer to analyze
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++)
+                if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+            for (let i = 1; i < SIZE / 2; i++)
+                if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+            buf = buf.slice(r1, r2);
+            SIZE = buf.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++)
+                for (let j = 0; j < SIZE - i; j++)
+                    c[i] = c[i] + buf[j] * buf[j + i];
+
+            let d = 0; while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            let T0 = maxpos;
+
+            // Interpolation to get a more accurate pitch
+            let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+            let a = (x1 + x3 - 2 * x2) / 2;
+            let b = (x3 - x1) / 2;
+            if (a) T0 = T0 - b / (2 * a);
+
+            return sampleRate / T0;
+        }
+
+        function drawLoop() {
+            requestAnimationFrame(drawLoop);
+
+            // Get time-domain data from the microphone
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            
+            // Calculate pitch
+            const pitch = autoCorrelate(buffer, audioContext.sampleRate);
+
+            if (pitch !== -1) {
+                // Map the pitch (roughly 80Hz - 600Hz for human voices) to a radius
+                // You can adjust the math here to make the circle bigger/smaller
+                targetRadius = Math.max(10, Math.min(pitch * 0.4, canvas.height / 2 - 10));
+                infoDiv.innerText = `Pitch: ${Math.round(pitch)} Hz`;
+            } else {
+                // Shrink slowly if no voice is detected
+                targetRadius = 10;
+                infoDiv.innerText = `Pitch: -- Hz`;
+            }
+
+            // Smooth the transition using linear interpolation
+            currentRadius += (targetRadius - currentRadius) * 0.15;
+
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the circle
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, currentRadius, 0, 2 * Math.PI);
+            ctx.fillStyle = '#00e5ff'; // Cyan color
+            ctx.fill();
+            
+            // Add a subtle glow
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#00e5ff';
+        }
+    </script>
+</body>
+</html>
