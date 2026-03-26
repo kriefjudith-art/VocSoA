@@ -3,70 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baby Pitch Agency - Smooth JS Edition</title>
+    <title>Baby Pitch Agency - Research Edition</title>
     <style>
         body {
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            background-color: #87CEEB; /* Sky blue */
-            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
-            overflow: hidden;
+            margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; background-color: #87CEEB; font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; overflow: hidden;
         }
         #ui-container {
-            position: absolute;
-            z-index: 10;
-            text-align: center;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            position: absolute; z-index: 100; text-align: center; background: rgba(255, 255, 255, 0.95);
+            padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-width: 400px;
         }
-        h1 {
-            color: #FF4500;
-            margin-top: 0;
-            font-size: 32px;
-        }
+        h1 { color: #FF4500; margin-top: 0; font-size: 28px; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; font-size: 16px; }
         button {
-            padding: 15px 40px;
-            font-size: 24px;
-            font-weight: bold;
-            cursor: pointer;
-            background-color: #FF1493; /* Hot pink */
-            color: white;
-            border: none;
-            border-radius: 50px;
-            transition: transform 0.2s, background-color 0.2s;
-            box-shadow: 0 6px 0 #C71585;
+            width: 100%; padding: 15px; font-size: 20px; font-weight: bold; cursor: pointer; background-color: #FF1493;
+            color: white; border: none; border-radius: 50px; transition: transform 0.2s, background-color 0.2s;
+            box-shadow: 0 6px 0 #C71585; margin-top: 10px;
         }
-        button:active {
-            transform: translateY(6px);
-            box-shadow: 0 0 0 #C71585;
+        button:active { transform: translateY(6px); box-shadow: 0 0 0 #C71585; }
+        #stopButton {
+            position: absolute; top: 20px; right: 20px; width: auto; padding: 10px 20px;
+            background-color: #FF4500; box-shadow: 0 4px 0 #B22222; display: none; z-index: 100;
         }
-        canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #webcam-preview {
+            position: absolute; bottom: 20px; left: 20px; width: 200px; border: 4px solid white;
+            border-radius: 10px; z-index: 50; display: none;
         }
     </style>
 </head>
 <body>
 
     <div id="ui-container">
-        <h1>🐥 Super Baby Bird!</h1>
-        <p>Pure Pitch Control. Smooth 60 FPS.</p>
-        <button id="startButton">Start Microphone</button>
+        <h1>🐥 Baby Agency Study</h1>
+        <div class="input-group">
+            <label for="participantId">Participant Number:</label>
+            <input type="text" id="participantId" placeholder="e.g. 001">
+        </div>
+        <div class="input-group">
+            <label for="condition">Condition:</label>
+            <select id="condition">
+                <option value="high">High Contingency (Strong SoA)</option>
+                <option value="low">Low Contingency (Weak SoA)</option>
+            </select>
+        </div>
+        <button id="startButton">Start Experiment</button>
     </div>
-    
+
+    <button id="stopButton">Stop & Save Data</button>
+    <video id="webcam-preview" autoplay playsinline muted></video>
     <canvas id="visualizer"></canvas>
 
     <script>
         const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
         const uiContainer = document.getElementById('ui-container');
+        const webcamPreview = document.getElementById('webcam-preview');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
 
@@ -77,221 +71,440 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        let audioContext, analyser, microphone;
+        let audioContext, analyser, microphone, micStream;
+        let participantId = "";
+        let condition = "high";
+        let latencyDelay = 0;
         
-        // --- BABY STUDY SETTINGS ---
         const MIN_PITCH = 150; 
         const MAX_PITCH = 1200; 
-        const APERIODICITY_THRESHOLD = 0.2; // Stricter harmonicity (ignores noise)
+        const APERIODICITY_THRESHOLD = 0.2; 
         
-        let bird = { x: 100, y: canvas.height / 2, angle: 0 };
+        let bird = { x: 100, y: canvas.height / 2, angle: 0, vx: 0, vy: 0 };
         let targetY = canvas.height / 2;
         let trajectoryPath = [];
         let currentPitch = -1;
+        let currentHarmonicity = 1.0;
+        
+        let vocalizationCount = 0;
+        let lastIsVocalizing = false;
+        let experimentStarted = false;
+        let explorationPhase = false;
+        
+        let lastVocalTime = 0;
+        const CONTINUE_TIME = 1000; 
+        
+        let timeSeriesData = [];
+        let startTime = 0;
+        
+        const BALLOON_EMOJIS = ['🍎', '🍌', '🍇', '🍊'];
+        let balloons = [];
+        let particles = [];
+
+        function initBalloons() {
+            const colors = ['#FF4500', '#1E90FF', '#32CD32', '#9932CC']; // Red, Blue, Green, Purple
+            balloons = [
+                { id: 1, x: canvas.width * 0.35, y: canvas.height * 0.25, emoji: '🍎', color: colors[0], popped: false },
+                { id: 2, x: canvas.width * 0.75, y: canvas.height * 0.35, emoji: '🍌', color: colors[1], popped: false },
+                { id: 3, x: canvas.width * 0.45, y: canvas.height * 0.75, emoji: '🍇', color: colors[2], popped: false },
+                { id: 4, x: canvas.width * 0.85, y: canvas.height * 0.65, emoji: '🍊', color: colors[3], popped: false }
+            ];
+        }
+
+        function drawBalloon(ctx, x, y, color) {
+            const w = 45; // Wider
+            const h = 60; // Taller
+            
+            ctx.save();
+            
+            // 1. String
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x, y + h);
+            ctx.quadraticCurveTo(x + 10, y + h + 15, x, y + h + 40);
+            ctx.stroke();
+
+            // 2. Balloon Body with Gradient
+            const gradient = ctx.createRadialGradient(x - w/3, y - h/3, 5, x, y, h);
+            gradient.addColorStop(0, '#FFFFFF'); // Highlight source
+            gradient.addColorStop(0.2, color);
+            gradient.addColorStop(1, 'black'); // Deep shadow
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.ellipse(x, y, w, h, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 3. The "Knot" at the bottom
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(x, y + h);
+            ctx.lineTo(x - 8, y + h + 8);
+            ctx.lineTo(x + 8, y + h + 8);
+            ctx.closePath();
+            ctx.fill();
+
+            // 4. Glossy Highlight
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(x - w/2.5, y - h/2.5, w/4, h/5, Math.PI/4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        let latencyQueue = [];
 
         startButton.addEventListener('click', async () => {
+            participantId = document.getElementById('participantId').value || "test";
+            condition = document.getElementById('condition').value;
+            latencyDelay = condition === 'low' ? (150 + Math.random() * 150) : 0;
+            
             if (audioContext) return; 
 
             try {
-                // Request raw, unprocessed audio for better pitch detection
                 const constraints = { 
-                    audio: { 
-                        echoCancellation: false, 
-                        autoGainControl: false, 
-                        noiseSuppression: false 
-                    } 
+                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
+                    video: { width: 640, height: 480 }
                 };
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                micStream = await navigator.mediaDevices.getUserMedia(constraints);
+                webcamPreview.srcObject = micStream;
+                webcamPreview.style.display = 'block';
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 2048; 
                 
-                microphone = audioContext.createMediaStreamSource(stream);
+                microphone = audioContext.createMediaStreamSource(micStream);
                 microphone.connect(analyser);
 
                 uiContainer.style.display = 'none';
+                stopButton.style.display = 'block';
                 
+                bird.y = canvas.height / 2;
+                targetY = canvas.height / 2;
+                
+                experimentStarted = true;
+                startTime = performance.now();
+                startRecording(micStream);
                 drawLoop();
             } catch (err) {
-                console.error('Error accessing microphone:', err);
-                alert('Could not access microphone.');
+                console.error(err);
+                alert('Permissions denied.');
             }
         });
 
-        // --- THE YIN ALGORITHM (Ported to fast JavaScript) ---
+        stopButton.addEventListener('click', () => {
+            stopExperiment();
+        });
+
         function yinAlgorithm(buffer, sampleRate) {
             let halfBufferSize = Math.floor(buffer.length / 2);
             let yinBuffer = new Float32Array(halfBufferSize);
-
-            // Step 1: Difference function
             for (let tau = 0; tau < halfBufferSize; tau++) {
                 for (let i = 0; i < halfBufferSize; i++) {
                     let delta = buffer[i] - buffer[i + tau];
                     yinBuffer[tau] += delta * delta;
                 }
             }
-
-            // Step 2: Cumulative mean normalized difference
             let runningSum = 0;
             yinBuffer[0] = 1;
             for (let tau = 1; tau < halfBufferSize; tau++) {
                 runningSum += yinBuffer[tau];
                 yinBuffer[tau] *= tau / runningSum;
             }
-
-            // Step 3: Absolute threshold
             let tauEstimate = -1;
             let aperiodicity = 1.0;
-            
             for (let tau = 2; tau < halfBufferSize; tau++) {
                 if (yinBuffer[tau] < APERIODICITY_THRESHOLD) {
-                    while (tau + 1 < halfBufferSize && yinBuffer[tau + 1] < yinBuffer[tau]) {
-                        tau++;
-                    }
+                    while (tau + 1 < halfBufferSize && yinBuffer[tau + 1] < yinBuffer[tau]) tau++;
                     tauEstimate = tau;
                     aperiodicity = yinBuffer[tau];
                     break;
                 }
             }
-
             if (tauEstimate === -1) return { pitch: -1, aperiodicity: 1.0 };
             return { pitch: sampleRate / tauEstimate, aperiodicity: aperiodicity };
         }
 
-        // --- DRAW THE SUPERHERO BIRD ---
+        function playPopSound() {
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            const now = audioContext.currentTime;
+
+            // 1. The "Pop" (low-mid impact)
+            const osc1 = audioContext.createOscillator();
+            const gain1 = audioContext.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(200, now);
+            osc1.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+            gain1.gain.setValueAtTime(0.4, now);
+            gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc1.connect(gain1); gain1.connect(audioContext.destination);
+            osc1.start(now); osc1.stop(now + 0.1);
+
+            // 2. The "Joyful Chime" (High-pitched arpeggio: C major)
+            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+            notes.forEach((freq, i) => {
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, now + i * 0.04);
+                gain.gain.setValueAtTime(0.2, now + i * 0.04);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.04 + 0.4);
+                osc.connect(gain); gain.connect(audioContext.destination);
+                osc.start(now + i * 0.04); osc.stop(now + i * 0.04 + 0.4);
+            });
+        }
+
+        function createConfetti(x, y) {
+            for (let i = 0; i < 50; i++) {
+                particles.push({
+                    x, y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15,
+                    color: `hsl(${Math.random() * 360}, 100%, 50%)`, size: Math.random() * 8 + 4, life: 120
+                });
+            }
+        }
+
+        function createFood(x, y, emoji) {
+            particles.push({
+                x, y, vx: (Math.random() - 0.5) * 5, vy: -10 - Math.random() * 5,
+                emoji, size: 40, life: 120, isFood: true, gravity: 0.5
+            });
+        }
+
+        let expRecorder, camRecorder;
+        let expChunks = [], camChunks = [];
+
+        function startRecording(stream) {
+            const canvasStream = canvas.captureStream(30);
+            
+            // 1. Experiment Video (Canvas + Mic Audio)
+            const expStream = new MediaStream([
+                ...canvasStream.getVideoTracks(),
+                ...stream.getAudioTracks()
+            ]);
+            expRecorder = new MediaRecorder(expStream, { mimeType: 'video/webm' });
+            expRecorder.ondataavailable = (e) => { if (e.data.size > 0) expChunks.push(e.data); };
+            
+            // 2. Webcam Video (Raw Webcam Feed + Mic Audio)
+            camRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            camRecorder.ondataavailable = (e) => { if (e.data.size > 0) camChunks.push(e.data); };
+
+            expRecorder.start();
+            camRecorder.start();
+        }
+
+        function downloadFile(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 200);
+        }
+
+        function downloadCSV() {
+            let csv = "timestamp_ms,pitch_hz,harmonicity,bird_x,bird_y,is_vocalizing,ballon_popped_id,condition\n";
+            timeSeriesData.forEach(row => {
+                csv += `${row.t},${row.p},${row.h},${row.x},${row.y},${row.v},${row.pop},${row.cond}\n`;
+            });
+            downloadFile(new Blob([csv], { type: 'text/csv' }), `data_P${participantId}_${condition}.csv`);
+        }
+
+        function stopExperiment() {
+            if (!experimentStarted) return;
+            experimentStarted = false;
+            stopButton.style.display = 'none';
+            
+            downloadCSV();
+
+            expRecorder.stop();
+            camRecorder.stop();
+
+            let downloadsDone = 0;
+            const checkAndReload = () => {
+                downloadsDone++;
+                if (downloadsDone === 2) {
+                    setTimeout(() => {
+                        alert("Experiment Finished. All files (1 CSV, 2 Videos) downloaded.");
+                        location.reload();
+                    }, 500);
+                }
+            };
+
+            expRecorder.onstop = () => {
+                downloadFile(new Blob(expChunks, { type: 'video/webm' }), `video_experiment_P${participantId}_${condition}.webm`);
+                checkAndReload();
+            };
+
+            camRecorder.onstop = () => {
+                downloadFile(new Blob(camChunks, { type: 'video/webm' }), `video_webcam_P${participantId}_${condition}.webm`);
+                checkAndReload();
+            };
+        }
+
         function drawCoolBird(ctx, x, y, angle, time, isFlying) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-            
-            // 1. Draw Cape (Flaps using Sine wave if flying)
+            ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
             let capeFlap = isFlying ? Math.sin(time * 0.02) * 15 : 0;
-            ctx.fillStyle = '#DC143C'; // Crimson Red
-            ctx.beginPath();
-            ctx.moveTo(-20, -10);
-            ctx.lineTo(-60, -20);
-            ctx.lineTo(-50, 30 + capeFlap);
-            ctx.fill();
-
-            // 2. Draw Body (Bright Yellow)
-            ctx.fillStyle = '#FFD700'; 
-            ctx.beginPath();
-            ctx.arc(0, 0, 45, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 3. Draw Animated Wing
+            ctx.fillStyle = '#DC143C'; ctx.beginPath(); ctx.moveTo(-20, -10); ctx.lineTo(-60, -20); ctx.lineTo(-50, 30 + capeFlap); ctx.fill();
+            ctx.fillStyle = '#FFD700'; ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI * 2); ctx.fill();
             let wingY = isFlying ? Math.sin(time * 0.03) * 15 : 0;
-            ctx.fillStyle = '#FFA500'; // Orange
-            ctx.beginPath();
-            ctx.ellipse(-15, 5 + wingY, 25, 12, Math.PI / 8, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 4. Draw Sunglasses
-            ctx.fillStyle = '#000000';
-            ctx.beginPath();
-            ctx.arc(10, -15, 12, 0, Math.PI * 2); // Left lens
-            ctx.arc(35, -15, 12, 0, Math.PI * 2); // Right lens
-            ctx.fill();
-            
-            ctx.strokeStyle = '#000000'; // Glasses bridge
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(10, -15);
-            ctx.lineTo(35, -15);
-            ctx.stroke();
-
-            // Sunglasses reflections
-            ctx.fillStyle = '#FFFFFF';
-            ctx.beginPath();
-            ctx.arc(7, -18, 3, 0, Math.PI * 2);
-            ctx.arc(32, -18, 3, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 5. Draw Beak
-            ctx.fillStyle = '#FF8C00'; // Dark Orange
-            ctx.beginPath();
-            ctx.moveTo(40, -5);
-            ctx.lineTo(65, 5);
-            ctx.lineTo(40, 15);
-            ctx.fill();
-
+            ctx.fillStyle = '#FFA500'; ctx.beginPath(); ctx.ellipse(-15, 5 + wingY, 22, 11, Math.PI / 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#000000'; ctx.beginPath(); ctx.arc(10, -15, 10, 0, Math.PI * 2); ctx.arc(32, -15, 10, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#000000'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(10, -15); ctx.lineTo(32, -15); ctx.stroke();
+            ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(7, -18, 3, 0, Math.PI * 2); ctx.arc(29, -18, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#FF8C00'; ctx.beginPath(); ctx.moveTo(35, -5); ctx.lineTo(60, 5); ctx.lineTo(35, 15); ctx.fill();
             ctx.restore();
         }
 
         function drawLoop() {
+            if (!experimentStarted) return;
             requestAnimationFrame(drawLoop);
 
             const buffer = new Float32Array(analyser.fftSize);
             analyser.getFloatTimeDomainData(buffer);
-            
-            // Apply JS YIN Algorithm
             const result = yinAlgorithm(buffer, audioContext.sampleRate);
             
             let isVocalizing = false;
+            let now = performance.now();
 
-            // Strict checking: Is it a clear voice? Is it in the baby range?
-            if (result.pitch !== -1 && result.aperiodicity < APERIODICITY_THRESHOLD) {
-                if (result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH) {
-                    currentPitch = result.pitch;
-                    isVocalizing = true;
+            if (result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) {
+                currentPitch = result.pitch;
+                currentHarmonicity = 1.0 - result.aperiodicity;
+                isVocalizing = true;
+                lastVocalTime = now;
+            } else {
+                currentHarmonicity = 1.0 - result.aperiodicity;
+            }
+
+            if (isVocalizing && !lastIsVocalizing) {
+                vocalizationCount++;
+                if (vocalizationCount >= 5 && !explorationPhase) {
+                    explorationPhase = true;
+                    initBalloons();
+                }
+            }
+            lastIsVocalizing = isVocalizing;
+
+            let effectiveVocalizing = isVocalizing;
+            let effectivePitch = currentPitch;
+            if (latencyDelay > 0) {
+                latencyQueue.push({ t: now, v: isVocalizing, p: currentPitch });
+                while (latencyQueue.length > 0 && now - latencyQueue[0].t > latencyDelay) {
+                    let delayed = latencyQueue.shift();
+                    effectiveVocalizing = delayed.v;
+                    effectivePitch = delayed.p;
                 }
             }
 
-            // --- UPDATE STATE ---
-            if (isVocalizing) {
-                bird.x += 6; 
-
-                // Map pitch to screen height (high pitch = top)
-                let normalizedPitch = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+            // --- PHYSICS & MOVEMENT ---
+            let isVocalizingNow = effectiveVocalizing;
+            let timeSinceVocal = now - lastVocalTime;
+            
+            if (isVocalizingNow) {
+                // Active propulsion
+                bird.vx = 6;
+                let normalizedPitch = (effectivePitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
                 normalizedPitch = Math.max(0.1, Math.min(0.9, normalizedPitch)); 
                 targetY = canvas.height - (normalizedPitch * canvas.height);
                 
-                trajectoryPath.push({ x: bird.x, y: bird.y });
+                // Smooth vertical follow
+                let dy = targetY - bird.y;
+                bird.vy = dy * 0.15;
+            } else if (timeSinceVocal < CONTINUE_TIME) {
+                // Glide phase: Maintain some speed but start decaying
+                // First 500ms maintain more, next 500ms decay more
+                let decayFactor = timeSinceVocal < 500 ? 0.98 : 0.92;
+                bird.vx *= decayFactor;
+                bird.vy *= decayFactor;
+            } else {
+                // Hard stop/very slow drift
+                bird.vx *= 0.85;
+                bird.vy *= 0.85;
+                if (bird.vx < 0.1) bird.vx = 0;
+                if (bird.vy < 0.1) bird.vy = 0;
             }
 
-            // Smooth interpolation
-            let dy = targetY - bird.y;
-            bird.y += dy * 0.15;
+            bird.x += bird.vx;
+            bird.y += bird.vy;
 
-            // Tilt mechanic
-            let targetAngle = isVocalizing ? (dy * 0.01) : 0;
-            bird.angle += (targetAngle - bird.angle) * 0.2;
+            let isMoving = bird.vx > 0.1;
+            let targetAngle = isMoving ? (bird.vy * 0.01) : 0;
+            bird.angle += (targetAngle - bird.angle) * 0.15;
 
-            // Loop screen
-            if (bird.x > canvas.width + 60) {
-                bird.x = 0;
+            if (bird.x > canvas.width + 100) {
+                bird.x = -100;
                 trajectoryPath = []; 
+                bird.y = canvas.height / 2;
+                targetY = canvas.height / 2;
+                if (explorationPhase && balloons.every(b => b.popped)) stopExperiment();
             }
 
-            // --- DRAWING ---
-            ctx.fillStyle = '#87CEEB';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (isMoving) trajectoryPath.push({ x: bird.x, y: bird.y });
 
-            // Draw Trajectory (Candy Stripe)
+            let poppedThisFrame = "False";
+            if (explorationPhase) {
+                balloons.forEach(b => {
+                    if (!b.popped) {
+                        let dist = Math.sqrt((bird.x - b.x)**2 + (bird.y - b.y)**2);
+                        if (dist < 80) { // Increased for larger balloons
+                            b.popped = true; poppedThisFrame = b.id;
+                            playPopSound(); createConfetti(b.x, b.y); createFood(b.x, b.y, b.emoji);
+                        }
+                    }
+                });
+            }
+
+            timeSeriesData.push({
+                t: (now - startTime).toFixed(2),
+                p: currentPitch.toFixed(2),
+                h: currentHarmonicity.toFixed(4),
+                x: bird.x.toFixed(2),
+                y: bird.y.toFixed(2),
+                v: isVocalizing ? "True" : "False",
+                pop: poppedThisFrame,
+                cond: condition
+            });
+
+            ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
             if (trajectoryPath.length > 1) {
-                ctx.beginPath();
-                ctx.moveTo(trajectoryPath[0].x, trajectoryPath[0].y);
-                for (let i = 1; i < trajectoryPath.length; i++) {
-                    ctx.lineTo(trajectoryPath[i].x, trajectoryPath[i].y);
-                }
-                
-                // Outer pink glow
-                ctx.strokeStyle = '#FF1493'; 
-                ctx.lineWidth = 16;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-                
-                // Inner white line
-                ctx.strokeStyle = '#FFFFFF'; 
-                ctx.lineWidth = 6;
-                ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(trajectoryPath[0].x, trajectoryPath[0].y);
+                for (let i = 1; i < trajectoryPath.length; i++) ctx.lineTo(trajectoryPath[i].x, trajectoryPath[i].y);
+                ctx.strokeStyle = 'rgba(255, 20, 147, 0.4)'; ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.stroke();
             }
 
-            // Draw the Super Bird!
-            const time = performance.now();
-            drawCoolBird(ctx, bird.x, bird.y, bird.angle, time, isVocalizing);
+            if (explorationPhase) {
+                balloons.forEach(b => {
+                    if (!b.popped) {
+                        drawBalloon(ctx, b.x, b.y, b.color);
+                    }
+                });
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i]; p.x += p.vx; p.y += p.vy; if (p.isFood) p.vy += p.gravity; p.life--;
+                if (p.life <= 0) particles.splice(i, 1);
+                else {
+                    if (p.isFood) { ctx.font = `${p.size}px serif`; ctx.fillText(p.emoji, p.x - p.size/2, p.y); }
+                    else { ctx.fillStyle = p.color; ctx.globalAlpha = p.life / 120; ctx.fillRect(p.x, p.y, p.size, p.size); ctx.globalAlpha = 1.0; }
+                }
+            }
+
+            drawCoolBird(ctx, bird.x, bird.y, bird.angle, now, isMoving);
+            
+            ctx.fillStyle = 'white'; ctx.font = '20px Arial';
+            ctx.fillText(`Vocals: ${vocalizationCount}/5`, 20, 30);
+            ctx.fillText(`Phase: ${explorationPhase ? 'Exploration' : 'Baseline'}`, 20, 60);
+            ctx.fillText(`Condition: ${condition}`, 20, 90);
         }
     </script>
 </body>
