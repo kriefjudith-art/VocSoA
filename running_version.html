@@ -63,6 +63,7 @@
         const webcamPreview = document.getElementById('webcam-preview');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
+        
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -85,6 +86,8 @@
         let trajectoryPath = [];
         let currentPitch = -1;
         let currentHarmonicity = 1.0;
+        
+        const V = 2; // required vocalization count to enter exploration
         
         let vocalizationCount = 0;
         let lastIsVocalizing = false;
@@ -384,10 +387,10 @@
             } else {
                 currentHarmonicity = 1.0 - result.aperiodicity;
             }
-
+            
             if (isVocalizing && !lastIsVocalizing) {
                 vocalizationCount++;
-                if (vocalizationCount >= 5 && !explorationPhase) {
+                if (vocalizationCount >= V && !explorationPhase) {
                     explorationPhase = true;
                     initBalloons();
                 }
@@ -502,7 +505,7 @@
             drawCoolBird(ctx, bird.x, bird.y, bird.angle, now, isMoving);
             
             ctx.fillStyle = 'white'; ctx.font = '20px Arial';
-            ctx.fillText(`Vocals: ${vocalizationCount}/5`, 20, 30);
+            ctx.fillText(`Vocals: ${vocalizationCount}/${V}`, 20, 30);
             ctx.fillText(`Phase: ${explorationPhase ? 'Exploration' : 'Baseline'}`, 20, 60);
             ctx.fillText(`Condition: ${condition}`, 20, 90);
         }
