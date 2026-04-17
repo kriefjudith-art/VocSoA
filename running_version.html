@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baby Pitch Agency - Research Edition</title>
+    <title>Baby Pitch Agency - Research Edition (v15_04)</title>
     <!-- MediaPipe Face Mesh -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -91,7 +91,7 @@
         let trialNumber = 1;
         let blockNumber = 1;
         let currentCondition = "C1";
-        let yokedSource = { p_id: null, trial_n: null };
+        let yokedSource = { p_id: "Self_generated", trial_n: "N/A" };
         let yokedTrajectoryData = null;
         let yokedIndex = 0;
         
@@ -126,10 +126,9 @@
             { id: 'duck', name: 'Duck', sound: 'cat_20.mp3', emoji: '🦆' }
         ];
         let clouds = [];
-        let particles = [];
         let isMovingForwards = true;
 
-        // --- IMPROVED EYE TRACKING ---
+        // --- EYE TRACKING ---
         let gazeX = 0, gazeY = 0, gazeROI = null;
         let smoothedGazeX = canvas.width / 2, smoothedGazeY = canvas.height / 2;
         const GAZE_SMOOTHING = 0.12; 
@@ -160,16 +159,12 @@
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
                 if (testEyetrackingCheckbox.checked) drawLandmarks(landmarks);
-
                 const leftIris = landmarks[468], leftInner = landmarks[133], leftOuter = landmarks[33];
                 const leftTop = landmarks[159], leftBottom = landmarks[145];
-                
                 const x_ratio = (leftIris.x - leftOuter.x) / (leftInner.x - leftOuter.x);
                 const y_ratio = (leftIris.y - leftTop.y) / (leftBottom.y - leftTop.y);
-                
                 const rawGazeX = ((x_ratio - 0.35) / 0.3) * canvas.width;
                 const rawGazeY = ((y_ratio - 0.4) / 0.2) * canvas.height;
-
                 smoothedGazeX += GAZE_SMOOTHING * (rawGazeX - smoothedGazeX);
                 smoothedGazeY += GAZE_SMOOTHING * (rawGazeY - smoothedGazeY);
                 gazeX = smoothedGazeX; gazeY = smoothedGazeY;
@@ -239,8 +234,26 @@
         async function stopAndUploadMedia() {
             return new Promise((resolve) => {
                 let count = 0; const checkDone = () => { count++; if (count === 2) resolve(); };
-                expRecorder.onstop = async () => { const blob = new Blob(expChunks, { type: 'video/webm' }); const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'webm'); formData.append('trial_number', trialNumber); formData.append('file', blob, 'experiment.webm'); await fetch('/api/save_data', { method: 'POST', body: formData }); checkDone(); };
-                camRecorder.onstop = async () => { const blob = new Blob(camChunks, { type: 'video/webm' }); const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'webm_webcam'); formData.append('trial_number', trialNumber); formData.append('file', blob, 'webcam.webm'); await fetch('/api/save_data', { method: 'POST', body: formData }); checkDone(); };
+                expRecorder.onstop = async () => { 
+                    const blob = new Blob(expChunks, { type: 'video/webm' }); 
+                    const formData = new FormData(); 
+                    formData.append('participant_id', participantId); 
+                    formData.append('file_type', `webm_G${groupAssignment}`); 
+                    formData.append('trial_number', trialNumber); 
+                    formData.append('file', blob, 'experiment.webm'); 
+                    await fetch('/api/save_data', { method: 'POST', body: formData }); 
+                    checkDone(); 
+                };
+                camRecorder.onstop = async () => { 
+                    const blob = new Blob(camChunks, { type: 'video/webm' }); 
+                    const formData = new FormData(); 
+                    formData.append('participant_id', participantId); 
+                    formData.append('file_type', `webm_webcam_G${groupAssignment}`); 
+                    formData.append('trial_number', trialNumber); 
+                    formData.append('file', blob, 'webcam.webm'); 
+                    await fetch('/api/save_data', { method: 'POST', body: formData }); 
+                    checkDone(); 
+                };
                 expRecorder.stop(); camRecorder.stop();
             });
         }
@@ -248,12 +261,25 @@
         async function saveTrialData(isFinal = false) {
             await stopAndUploadMedia();
             if (currentCondition === "C1") {
-                const trajData = { participant_id: participantId, trial_number: trialNumber, condition: "C1", trajectory: trialTrajectoryToSave, trial_duration_ms: performance.now() - trialStartTime, recorded_at: new Date().toISOString() };
+                const trajData = { participant_id: participantId, trial_number: trialNumber, group: groupAssignment, condition: "C1", trajectory: trialTrajectoryToSave, trial_duration_ms: performance.now() - trialStartTime, recorded_at: new Date().toISOString() };
                 await fetch('/api/save_trajectory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(trajData) });
             }
-            const csvContent = "timestamp_ms,pitch_hz,harmonicity,balloon_x,balloon_y,balloon_vx,balloon_vy,is_vocalizing,gaze_x,gaze_y,gaze_roi,condition,phase\n" + timeSeriesData.map(d => Object.values(d).join(',')).join('\n');
-            const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'csv'); formData.append('trial_number', trialNumber); formData.append('file', new Blob([csvContent], { type: 'text/csv' }), 'data.csv');
+            
+            // --- UPDATED CSV LOGGING ---
+            const headers = "Participant_number,phase,Assigned_group,Trial_number,Block_number,Actual_condition,Yoked_source_p,Yoked_source_trial,pitch_hz,harmonicity,timestamp_ms,balloon_x,balloon_y,balloon_vx,balloon_vy,is_vocalizing,gaze_x,gaze_y,Gaze_ROI,Cloud_reveal_id,Reveal_percentage,Trial_start_time,Trial_elapsed_ms\n";
+            const csvContent = headers + timeSeriesData.map(d => [
+                participantId, d.phase, groupAssignment, trialNumber, blockNumber, currentCondition,
+                yokedSource.p_id, yokedSource.trial_n, d.p, d.h, d.t_absolute, d.bx, d.by, d.bvx, d.bvy,
+                d.v, d.gx, d.gy, d.groi, d.reveal_id, d.reveal_pct, trialStartTime.toFixed(2), d.t_elapsed
+            ].join(',')).join('\n');
+
+            const formData = new FormData(); 
+            formData.append('participant_id', participantId); 
+            formData.append('file_type', `csv_G${groupAssignment}`); 
+            formData.append('trial_number', trialNumber); 
+            formData.append('file', new Blob([csvContent], { type: 'text/csv' }), 'data.csv');
             await fetch('/api/save_data', { method: 'POST', body: formData });
+
             timeSeriesData = []; trialTrajectoryToSave = []; 
             if (!isFinal) startRecording(micStream);
         }
@@ -275,12 +301,10 @@
                 startTime = performance.now(); trialStartTime = startTime;
                 startRecording(micStream);
                 drawLoop();
-            } catch (err) { console.error(err); alert('Permissions denied or Camera/Mic error.'); }
+            } catch (err) { console.error(err); alert('Permissions denied.'); }
         });
 
-        stopButton.addEventListener('click', async () => {
-            await stopExperiment();
-        });
+        stopButton.addEventListener('click', async () => { await stopExperiment(); });
 
         async function stopExperiment() {
             if (!experimentStarted) return;
@@ -299,7 +323,7 @@
                     yokedSource = { p_id: res.source_p_id, trial_n: res.source_trial_n };
                     yokedIndex = 0;
                 }
-            } catch (err) { console.warn("Could not fetch yoked trajectory."); }
+            } catch (err) { console.warn("Could not fetch yoked trajectory."); yokedSource = { p_id: "Fallback_C1", trial_n: "N/A" }; }
         }
 
         function yinAlgorithm(buffer, sampleRate) {
@@ -317,20 +341,36 @@
             const result = yinAlgorithm(buffer, audioContext.sampleRate);
             let isVocalizing = false; let now = performance.now();
             if (result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) { currentPitch = result.pitch; currentHarmonicity = 1.0 - result.aperiodicity; isVocalizing = true; lastVocalTime = now; }
-            if (isVocalizing && !lastIsVocalizing) { vocalizationCount++; if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) { currentPhase = PHASES.EXPLORATION; initClouds(); } }
+            if (isVocalizing && !lastIsVocalizing) { vocalizationCount++; if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) { currentPhase = PHASES.EXPLORATION; initClouds(); if (currentCondition !== "C1") fetchYokedTrajectory(); } }
             lastIsVocalizing = isVocalizing;
             let timeSinceVocal = now - lastVocalTime; let moving = false;
+            
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
-                if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
+                if (currentCondition === "C1" || currentPhase === PHASES.BASELINE) {
+                    if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
+                        moving = true;
+                        const padding = 50;
+                        let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+                        norm = Math.max(0, Math.min(1, norm));
+                        let tY = (canvas.height - padding * 2) * (1 - norm) + padding;
+                        balloon.vy = (tY - balloon.y) * 0.1;
+                    } else { balloon.vy = 0; }
+                } else if (currentCondition === "C2" && yokedTrajectoryData) {
+                    if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
+                        moving = true;
+                        const d = yokedTrajectoryData[yokedIndex];
+                        balloon.x = d.balloon_x; balloon.y = d.balloon_y;
+                        yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
+                    }
+                } else if (currentCondition === "C3" && yokedTrajectoryData) {
                     moving = true;
-                    const padding = 50;
-                    let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
-                    norm = Math.max(0, Math.min(1, norm));
-                    let tY = (canvas.height - padding * 2) * (1 - norm) + padding;
-                    balloon.vy = (tY - balloon.y) * 0.1;
+                    const d = yokedTrajectoryData[yokedIndex];
+                    balloon.x = d.balloon_x; balloon.y = d.balloon_y;
+                    yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
                 }
             }
-            if (moving && currentPhase !== PHASES.TEST) {
+
+            if (moving && currentPhase !== PHASES.TEST && currentCondition === "C1") {
                 balloon.vx = isMovingForwards ? 4 : -4;
                 balloon.x += balloon.vx; balloon.y += balloon.vy;
                 const padding = 50;
@@ -341,12 +381,45 @@
                     saveTrialData().then(() => {
                         trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; }
                         if (blockNumber > 3) { currentPhase = PHASES.TEST; initClouds(); }
-                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); }
+                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); }
+                    });
+                }
+            } else if (moving && (currentCondition === "C2" || currentCondition === "C3")) {
+                if (yokedIndex >= yokedTrajectoryData.length - 1) {
+                    saveTrialData().then(() => {
+                        trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; }
+                        if (blockNumber > 3) { currentPhase = PHASES.TEST; initClouds(); }
+                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); }
                     });
                 }
             }
-            if (currentPhase === PHASES.EXPLORATION) { clouds.forEach(cloud => { let dist = Math.sqrt((balloon.x - cloud.x - cloud.width/2)**2 + (balloon.y - cloud.y - cloud.height/2)**2); if (dist < 100) revealCloud(cloud); }); }
-            timeSeriesData.push({ t: (now - startTime).toFixed(2), p: currentPitch.toFixed(2), h: currentHarmonicity.toFixed(4), bx: balloon.x.toFixed(2), by: balloon.y.toFixed(2), bvx: balloon.vx.toFixed(2), bvy: balloon.vy.toFixed(2), v: isVocalizing ? "True" : "False", gx: gazeX.toFixed(2), gy: gazeY.toFixed(2), groi: gazeROI, cond: currentCondition, phase: currentPhase });
+
+            let activeRevealId = null, activeRevealPct = 0;
+            if (currentPhase === PHASES.EXPLORATION) {
+                clouds.forEach(cloud => {
+                    let dist = Math.sqrt((balloon.x - cloud.x - cloud.width/2)**2 + (balloon.y - cloud.y - cloud.height/2)**2);
+                    if (dist < 100) { revealCloud(cloud); activeRevealId = cloud.id; activeRevealPct = cloud.revealedPercent; }
+                });
+            }
+
+            timeSeriesData.push({
+                t_absolute: (now - startTime).toFixed(2),
+                t_elapsed: (now - trialStartTime).toFixed(2),
+                p: currentPitch.toFixed(2),
+                h: currentHarmonicity.toFixed(4),
+                bx: balloon.x.toFixed(2),
+                by: balloon.y.toFixed(2),
+                bvx: balloon.vx.toFixed(2),
+                bvy: balloon.vy.toFixed(2),
+                v: isVocalizing ? "True" : "False",
+                gx: gazeX.toFixed(2),
+                gy: gazeY.toFixed(2),
+                groi: gazeROI === null ? "null" : gazeROI,
+                reveal_id: activeRevealId === null ? "null" : activeRevealId,
+                reveal_pct: activeRevealPct.toFixed(2),
+                phase: currentPhase
+            });
+
             if (currentCondition === "C1") trialTrajectoryToSave.push({timestamp_ms: now - trialStartTime, balloon_x: balloon.x, balloon_y: balloon.y});
 
             ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
