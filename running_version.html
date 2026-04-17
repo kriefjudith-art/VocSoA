@@ -175,6 +175,14 @@
 
         function playSound(soundFile) { new Audio(`/VocSoA/sounds/${soundFile}`).play(); }
 
+        function determineCondition(group, block, p_id) {
+            if (p_id === '1' || p_id === 1) return 'C1';
+            if (group === 'G1') return block === 2 ? 'C2' : 'C1';
+            if (group === 'G2') return block === 2 ? 'C1' : 'C2';
+            if (group === 'G3') return 'C3';
+            return 'C1';
+        }
+
         function initClouds() {
             const w = canvas.width, h = canvas.height;
             const regions = [{ id: 0, x: w * 0.1, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, { id: 1, x: w * 0.5, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, { id: 2, x: w * 0.1, y: h * 0.5, w: w * 0.4, h: h * 0.4 }, { id: 3, x: w * 0.5, y: h * 0.5, w: w * 0.4, h: h * 0.4 }];
@@ -241,7 +249,7 @@
                 startTime = performance.now(); trialStartTime = startTime;
                 startRecording(micStream);
                 drawLoop();
-            } catch (err) { console.error(err); alert('Permissions denied.'); }
+            } catch (err) { console.error(err); alert('Permissions denied or Camera/Mic error.'); }
         });
 
         stopButton.addEventListener('click', async () => {
