@@ -90,7 +90,6 @@
         let yokedTrajectoryData = null;
         let yokedIndex = 0;
         
-        // --- EXPERIMENT PHASES ---
         const PHASES = { BASELINE: 'BASELINE', EXPLORATION: 'EXPLORATION', TEST: 'TEST' };
         let currentPhase = PHASES.BASELINE;
         let experimentStarted = false;
@@ -101,7 +100,6 @@
         
         let balloon = { x: 100, y: canvas.height / 2, angle: 0, vx: 0, vy: 0 };
         let targetY = canvas.height / 2;
-        let trajectoryPath = [];
         let currentPitch = -1;
         let currentHarmonicity = 1.0;
         
@@ -126,54 +124,31 @@
         let particles = [];
         let isMovingForwards = true;
 
-        // Eye Tracking Data
+        // --- REFINED EYE TRACKING ---
         let gazeX = 0, gazeY = 0, gazeROI = null;
+        let smoothedGazeX = 0, smoothedGazeY = 0;
+        const GAZE_SMOOTHING = 0.15; 
         let faceMesh;
 
-        function determineCondition(group, block, p_id) {
-            if (p_id === '1' || p_id === 1) return 'C1';
-            if (group === 'G1') return block === 2 ? 'C2' : 'C1';
-            if (group === 'G2') return block === 2 ? 'C1' : 'C2';
-            if (group === 'G3') return 'C3';
-            return 'C1';
-        }
-
         async function initEyeTracking() {
-            faceMesh = new FaceMesh({locateFile: (file) => {
-                return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-            }});
-            faceMesh.setOptions({
-                maxNumFaces: 1,
-                refineLandmarks: true,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
+            faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+            faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
             faceMesh.onResults(onFaceMeshResults);
-
-            const camera = new Camera(webcamPreview, {
-                onFrame: async () => {
-                    await faceMesh.send({image: webcamPreview});
-                },
-                width: 640,
-                height: 480
-            });
+            const camera = new Camera(webcamPreview, { onFrame: async () => await faceMesh.send({image: webcamPreview}), width: 640, height: 480 });
             camera.start();
         }
 
         function onFaceMeshResults(results) {
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
-                // Simple gaze estimation: use nose tip and eye center
-                const nose = landmarks[1];
-                gazeX = (1 - nose.x) * canvas.width;
-                gazeY = nose.y * canvas.height;
-                
-                // Map to ROI
+                const leftIris = landmarks[468], leftInner = landmarks[133], leftOuter = landmarks[33];
+                const x_ratio = (leftIris.x - leftOuter.x) / (leftInner.x - leftOuter.x);
+                const rawGazeX = (1 - (x_ratio - 0.2) / 0.6) * canvas.width;
+                const rawGazeY = landmarks[1].y * canvas.height;
+                smoothedGazeX += GAZE_SMOOTHING * (rawGazeX - smoothedGazeX);
+                smoothedGazeY += GAZE_SMOOTHING * (rawGazeY - smoothedGazeY);
+                gazeX = smoothedGazeX; gazeY = smoothedGazeY;
                 updateGazeROI(gazeX, gazeY);
-                
-                if (testEyetrackingCheckbox.checked) {
-                    drawGazeDebug(landmarks);
-                }
             }
         }
 
@@ -182,82 +157,36 @@
             clouds.forEach(cloud => {
                 if (x > cloud.x && x < cloud.x + cloud.width && y > cloud.y && y < cloud.y + cloud.height) {
                     gazeROI = cloud.id;
-                    if (currentPhase === PHASES.TEST) {
-                        revealCloud(cloud);
-                    }
+                    if (currentPhase === PHASES.TEST) revealCloud(cloud);
                 }
             });
         }
 
         function revealCloud(cloud) {
             if (cloud.revealedPercent < 100) {
-                // Wait 200ms after overlap (or gaze)
                 setTimeout(() => {
                     cloud.revealedPercent = Math.min(100, cloud.revealedPercent + 5);
                     if (cloud.revealedPercent >= 50 && !cloud.soundPlayed) {
-                        playSound(cloud.animal.sound);
-                        cloud.soundPlayed = true;
+                        playSound(cloud.animal.sound); cloud.soundPlayed = true;
                     }
                 }, 200);
             }
         }
 
-        function playSound(soundFile) {
-            const audio = new Audio(`/VocSoA/sounds/${soundFile}`);
-            audio.play();
-        }
+        function playSound(soundFile) { new Audio(`/VocSoA/sounds/${soundFile}`).play(); }
 
         function initClouds() {
-            const w = canvas.width;
-            const h = canvas.height;
-            const regions = [
-                { id: 0, x: w * 0.1, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, // TL
-                { id: 1, x: w * 0.5, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, // TR
-                { id: 2, x: w * 0.1, y: h * 0.5, w: w * 0.4, h: h * 0.4 }, // BL
-                { id: 3, x: w * 0.5, y: h * 0.5, w: w * 0.4, h: h * 0.4 }  // BR
-            ];
+            const w = canvas.width, h = canvas.height;
+            const regions = [{ id: 0, x: w * 0.1, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, { id: 1, x: w * 0.5, y: h * 0.1, w: w * 0.4, h: h * 0.4 }, { id: 2, x: w * 0.1, y: h * 0.5, w: w * 0.4, h: h * 0.4 }, { id: 3, x: w * 0.5, y: h * 0.5, w: w * 0.4, h: h * 0.4 }];
             const shuffledAnimals = [...ANIMALS].sort(() => Math.random() - 0.5);
-            clouds = regions.map((reg, i) => ({
-                id: reg.id,
-                x: reg.x + Math.random() * (reg.w - 200),
-                y: reg.y + Math.random() * (reg.h - 120),
-                width: 250,
-                height: 150,
-                revealedPercent: 0,
-                animal: shuffledAnimals[i],
-                soundPlayed: false
-            }));
+            clouds = regions.map((reg, i) => ({ id: reg.id, x: reg.x + Math.random() * (reg.w - 200), y: reg.y + Math.random() * (reg.h - 120), width: 250, height: 150, revealedPercent: 0, animal: shuffledAnimals[i], soundPlayed: false }));
         }
 
         function drawHotAirBalloon(ctx, x, y, angle) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-            
-            // Basket
-            ctx.fillStyle = '#8B4513';
-            ctx.fillRect(-20, 30, 40, 30);
-            
-            // Ropes
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(-15, 30); ctx.lineTo(-25, -5);
-            ctx.moveTo(15, 30); ctx.lineTo(25, -5);
-            ctx.stroke();
-
-            // Balloon
-            const gradient = ctx.createRadialGradient(-10, -30, 10, 0, -20, 60);
-            gradient.addColorStop(0, '#FF4500');
-            gradient.addColorStop(0.5, '#FFD700');
-            gradient.addColorStop(1, '#FF4500');
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.moveTo(0, 30);
-            ctx.bezierCurveTo(-60, 30, -70, -70, 0, -80);
-            ctx.bezierCurveTo(70, -70, 60, 30, 0, 30);
-            ctx.fill();
-            
+            ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+            ctx.fillStyle = '#8B4513'; ctx.fillRect(-20, 30, 40, 30);
+            ctx.strokeStyle = '#000000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-15, 30); ctx.lineTo(-25, -5); ctx.moveTo(15, 30); ctx.lineTo(25, -5); ctx.stroke();
+            const gradient = ctx.createRadialGradient(-10, -30, 10, 0, -20, 60); gradient.addColorStop(0, '#FF4500'); gradient.addColorStop(0.5, '#FFD700'); gradient.addColorStop(1, '#FF4500'); ctx.fillStyle = gradient; ctx.beginPath(); ctx.moveTo(0, 30); ctx.bezierCurveTo(-60, 30, -70, -70, 0, -80); ctx.bezierCurveTo(70, -70, 60, 30, 0, 30); ctx.fill();
             ctx.restore();
         }
 
@@ -266,58 +195,65 @@
 
         function startRecording(stream) {
             const canvasStream = canvas.captureStream(30);
-            
-            // 1. Experiment Video (Canvas + Mic Audio)
-            const expStream = new MediaStream([
-                ...canvasStream.getVideoTracks(),
-                ...stream.getAudioTracks()
-            ]);
+            const expStream = new MediaStream([...canvasStream.getVideoTracks(), ...stream.getAudioTracks()]);
             expRecorder = new MediaRecorder(expStream, { mimeType: 'video/webm' });
-            expChunks = [];
-            expRecorder.ondataavailable = (e) => { if (e.data.size > 0) expChunks.push(e.data); };
-            
-            // 2. Webcam Video (Raw Webcam Feed + Mic Audio)
+            expChunks = []; expRecorder.ondataavailable = (e) => { if (e.data.size > 0) expChunks.push(e.data); };
             camRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-            camChunks = [];
-            camRecorder.ondataavailable = (e) => { if (e.data.size > 0) camChunks.push(e.data); };
-
-            expRecorder.start();
-            camRecorder.start();
+            camChunks = []; camRecorder.ondataavailable = (e) => { if (e.data.size > 0) camChunks.push(e.data); };
+            expRecorder.start(); camRecorder.start();
         }
 
         async function stopAndUploadMedia() {
             return new Promise((resolve) => {
-                let count = 0;
-                const checkDone = () => {
-                    count++;
-                    if (count === 2) resolve();
-                };
-
-                expRecorder.onstop = async () => {
-                    const blob = new Blob(expChunks, { type: 'video/webm' });
-                    const formData = new FormData();
-                    formData.append('participant_id', participantId);
-                    formData.append('file_type', 'webm');
-                    formData.append('trial_number', trialNumber);
-                    formData.append('file', blob, 'experiment.webm');
-                    await fetch('/api/save_data', { method: 'POST', body: formData });
-                    checkDone();
-                };
-
-                camRecorder.onstop = async () => {
-                    const blob = new Blob(camChunks, { type: 'video/webm' });
-                    const formData = new FormData();
-                    formData.append('participant_id', participantId);
-                    formData.append('file_type', 'webm_webcam');
-                    formData.append('trial_number', trialNumber);
-                    formData.append('file', blob, 'webcam.webm');
-                    await fetch('/api/save_data', { method: 'POST', body: formData });
-                    checkDone();
-                };
-
-                expRecorder.stop();
-                camRecorder.stop();
+                let count = 0; const checkDone = () => { count++; if (count === 2) resolve(); };
+                expRecorder.onstop = async () => { const blob = new Blob(expChunks, { type: 'video/webm' }); const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'webm'); formData.append('trial_number', trialNumber); formData.append('file', blob, 'experiment.webm'); await fetch('/api/save_data', { method: 'POST', body: formData }); checkDone(); };
+                camRecorder.onstop = async () => { const blob = new Blob(camChunks, { type: 'video/webm' }); const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'webm_webcam'); formData.append('trial_number', trialNumber); formData.append('file', blob, 'webcam.webm'); await fetch('/api/save_data', { method: 'POST', body: formData }); checkDone(); };
+                expRecorder.stop(); camRecorder.stop();
             });
+        }
+
+        async function saveTrialData(isFinal = false) {
+            await stopAndUploadMedia();
+            if (currentCondition === "C1") {
+                const trajData = { participant_id: participantId, trial_number: trialNumber, condition: "C1", trajectory: trialTrajectoryToSave, trial_duration_ms: performance.now() - trialStartTime, recorded_at: new Date().toISOString() };
+                await fetch('/api/save_trajectory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(trajData) });
+            }
+            const csvContent = "timestamp_ms,pitch_hz,harmonicity,balloon_x,balloon_y,balloon_vx,balloon_vy,is_vocalizing,gaze_x,gaze_y,gaze_roi,condition,phase\n" + timeSeriesData.map(d => Object.values(d).join(',')).join('\n');
+            const formData = new FormData(); formData.append('participant_id', participantId); formData.append('file_type', 'csv'); formData.append('trial_number', trialNumber); formData.append('file', new Blob([csvContent], { type: 'text/csv' }), 'data.csv');
+            await fetch('/api/save_data', { method: 'POST', body: formData });
+            timeSeriesData = []; trialTrajectoryToSave = []; 
+            if (!isFinal) startRecording(micStream);
+        }
+
+        startButton.addEventListener('click', async () => {
+            participantId = document.getElementById('participantId').value || "test";
+            groupAssignment = document.getElementById('groupAssignment').value;
+            blockNumber = 1; trialNumber = 1; currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
+            if (audioContext) return; 
+            try {
+                const constraints = { audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }, video: { width: 640, height: 480 } };
+                micStream = await navigator.mediaDevices.getUserMedia(constraints);
+                webcamPreview.srcObject = micStream; if (testEyetrackingCheckbox.checked) webcamPreview.style.display = 'block';
+                audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; microphone = audioContext.createMediaStreamSource(micStream); microphone.connect(analyser);
+                uiContainer.style.display = 'none'; stopButton.style.display = 'block';
+                await initEyeTracking();
+                balloon.x = 100; balloon.y = canvas.height / 2; currentPhase = PHASES.BASELINE; experimentStarted = true;
+                startTime = performance.now(); trialStartTime = startTime;
+                startRecording(micStream);
+                drawLoop();
+            } catch (err) { console.error(err); alert('Permissions denied.'); }
+        });
+
+        stopButton.addEventListener('click', async () => {
+            await stopExperiment();
+        });
+
+        async function stopExperiment() {
+            if (!experimentStarted) return;
+            experimentStarted = false;
+            await saveTrialData(true);
+            alert("Experiment Finished. All data saved.");
+            location.reload();
         }
 
         async function fetchYokedTrajectory() {
@@ -329,294 +265,64 @@
                     yokedSource = { p_id: res.source_p_id, trial_n: res.source_trial_n };
                     yokedIndex = 0;
                 }
-            } catch (err) {
-                console.warn("Could not fetch yoked trajectory, falling back to C1 behavior.");
-                currentCondition = "C1";
-            }
+            } catch (err) { console.warn("Could not fetch yoked trajectory."); }
         }
-
-        async function saveTrialData() {
-            // Stop recording for this trial and upload
-            await stopAndUploadMedia();
-
-            // Save Trajectory JSON if C1
-            if (currentCondition === "C1") {
-                const trajData = {
-                    participant_id: participantId,
-                    trial_number: trialNumber,
-                    condition: "C1",
-                    trajectory: trialTrajectoryToSave,
-                    trial_duration_ms: performance.now() - trialStartTime,
-                    recorded_at: new Date().toISOString()
-                };
-                await fetch('/api/save_trajectory', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(trajData)
-                });
-            }
-
-            // Save CSV Log
-            const csvContent = "timestamp_ms,pitch_hz,harmonicity,balloon_x,balloon_y,balloon_vx,balloon_vy,is_vocalizing,gaze_x,gaze_y,gaze_roi,condition,phase\n" + 
-                timeSeriesData.map(d => Object.values(d).join(',')).join('\n');
-            
-            const formData = new FormData();
-            formData.append('participant_id', participantId);
-            formData.append('file_type', 'csv');
-            formData.append('trial_number', trialNumber);
-            formData.append('file', new Blob([csvContent], { type: 'text/csv' }), 'data.csv');
-            
-            await fetch('/api/save_data', { method: 'POST', body: formData });
-            
-            // Reset for next trial
-            timeSeriesData = [];
-            trialTrajectoryToSave = [];
-            
-            // Restart recording for next trial
-            startRecording(micStream);
-        }
-
-        startButton.addEventListener('click', async () => {
-            participantId = document.getElementById('participantId').value || "test";
-            groupAssignment = document.getElementById('groupAssignment').value;
-            blockNumber = 1;
-            trialNumber = 1;
-            currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
-            
-            if (audioContext) return; 
-
-            try {
-                const constraints = { 
-                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
-                    video: { width: 640, height: 480 }
-                };
-                micStream = await navigator.mediaDevices.getUserMedia(constraints);
-                webcamPreview.srcObject = micStream;
-                if (testEyetrackingCheckbox.checked) webcamPreview.style.display = 'block';
-                
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048; 
-                microphone = audioContext.createMediaStreamSource(micStream);
-                microphone.connect(analyser);
-
-                uiContainer.style.display = 'none';
-                stopButton.style.display = 'block';
-                
-                await initEyeTracking();
-                
-                balloon.x = 100;
-                balloon.y = canvas.height / 2;
-                currentPhase = PHASES.BASELINE;
-                experimentStarted = true;
-                startTime = performance.now();
-                trialStartTime = startTime;
-                
-                drawLoop();
-            } catch (err) {
-                console.error(err);
-                alert('Permissions denied.');
-            }
-        });
 
         function yinAlgorithm(buffer, sampleRate) {
-            let halfBufferSize = Math.floor(buffer.length / 2);
-            let yinBuffer = new Float32Array(halfBufferSize);
-            for (let tau = 0; tau < halfBufferSize; tau++) {
-                for (let i = 0; i < halfBufferSize; i++) {
-                    let delta = buffer[i] - buffer[i + tau];
-                    yinBuffer[tau] += delta * delta;
-                }
-            }
-            let runningSum = 0;
-            yinBuffer[0] = 1;
-            for (let tau = 1; tau < halfBufferSize; tau++) {
-                runningSum += yinBuffer[tau];
-                yinBuffer[tau] *= tau / runningSum;
-            }
-            let tauEstimate = -1;
-            let aperiodicity = 1.0;
-            for (let tau = 2; tau < halfBufferSize; tau++) {
-                if (yinBuffer[tau] < APERIODICITY_THRESHOLD) {
-                    while (tau + 1 < halfBufferSize && yinBuffer[tau + 1] < yinBuffer[tau]) tau++;
-                    tauEstimate = tau;
-                    aperiodicity = yinBuffer[tau];
-                    break;
-                }
-            }
-            if (tauEstimate === -1) return { pitch: -1, aperiodicity: 1.0 };
-            return { pitch: sampleRate / tauEstimate, aperiodicity: aperiodicity };
+            let halfBufferSize = Math.floor(buffer.length / 2); let yinBuffer = new Float32Array(halfBufferSize);
+            for (let tau = 0; tau < halfBufferSize; tau++) { for (let i = 0; i < halfBufferSize; i++) { let delta = buffer[i] - buffer[i + tau]; yinBuffer[tau] += delta * delta; } }
+            let runningSum = 0; yinBuffer[0] = 1; for (let tau = 1; tau < halfBufferSize; tau++) { runningSum += yinBuffer[tau]; yinBuffer[tau] *= tau / runningSum; }
+            let tauEstimate = -1; let aperiodicity = 1.0; for (let tau = 2; tau < halfBufferSize; tau++) { if (yinBuffer[tau] < APERIODICITY_THRESHOLD) { while (tau + 1 < halfBufferSize && yinBuffer[tau + 1] < yinBuffer[tau]) tau++; tauEstimate = tau; aperiodicity = yinBuffer[tau]; break; } }
+            if (tauEstimate === -1) return { pitch: -1, aperiodicity: 1.0 }; return { pitch: sampleRate / tauEstimate, aperiodicity: aperiodicity };
         }
 
         function drawLoop() {
             if (!experimentStarted) return;
             requestAnimationFrame(drawLoop);
-
-            const buffer = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(buffer);
+            const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
             const result = yinAlgorithm(buffer, audioContext.sampleRate);
-            
-            let isVocalizing = false;
-            let now = performance.now();
-
-            if (result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) {
-                currentPitch = result.pitch;
-                currentHarmonicity = 1.0 - result.aperiodicity;
-                isVocalizing = true;
-                lastVocalTime = now;
-            }
-
-            if (isVocalizing && !lastIsVocalizing) {
-                vocalizationCount++;
-                if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) {
-                    currentPhase = PHASES.EXPLORATION;
-                    initClouds();
-                    if (currentCondition !== "C1") fetchYokedTrajectory();
-                }
-            }
+            let isVocalizing = false; let now = performance.now();
+            if (result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) { currentPitch = result.pitch; currentHarmonicity = 1.0 - result.aperiodicity; isVocalizing = true; lastVocalTime = now; }
+            if (isVocalizing && !lastIsVocalizing) { vocalizationCount++; if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) { currentPhase = PHASES.EXPLORATION; initClouds(); } }
             lastIsVocalizing = isVocalizing;
-
-            // --- MOVEMENT LOGIC ---
-            let timeSinceVocal = now - lastVocalTime;
-            let moving = false;
-
-            if (currentPhase === PHASES.EXPLORATION) {
-                if (currentCondition === "C1") {
-                    if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
-                        moving = true;
-                        // Map pitch to Y
-                        let targetY = canvas.height - ((currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * canvas.height);
-                        balloon.vy = (targetY - balloon.y) * 0.1;
-                    }
-                } else if (currentCondition === "C2" && yokedTrajectoryData) {
-                    if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
-                        moving = true;
-                        const data = yokedTrajectoryData[yokedIndex];
-                        balloon.x = data.balloon_x;
-                        balloon.y = data.balloon_y;
-                        yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
-                    }
-                } else if (currentCondition === "C3" && yokedTrajectoryData) {
-                    moving = true;
-                    const data = yokedTrajectoryData[yokedIndex];
-                    balloon.x = data.balloon_x;
-                    balloon.y = data.balloon_y;
-                    yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
-                }
-            } else if (currentPhase === PHASES.BASELINE) {
+            let timeSinceVocal = now - lastVocalTime; let moving = false;
+            if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
                 if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
                     moving = true;
                     let targetY = canvas.height - ((currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * canvas.height);
                     balloon.vy = (targetY - balloon.y) * 0.1;
                 }
             }
-
-            if (moving && currentCondition === "C1") {
-                if (isMovingForwards) balloon.vx = 4;
-                else balloon.vx = -4;
-                
-                balloon.x += balloon.vx;
-                balloon.y += balloon.vy;
-
-                // Screen bounds & Turn around
-                if (balloon.x > canvas.width - 50) isMovingForwards = false;
-                if (!isMovingForwards && balloon.x < 50) {
-                    // Trial Ends
+            if (moving && currentPhase !== PHASES.TEST) {
+                balloon.vx = isMovingForwards ? 4 : -4;
+                balloon.x += balloon.vx; balloon.y += balloon.vy;
+                const padding = 50;
+                balloon.x = Math.max(padding, Math.min(canvas.width - padding, balloon.x));
+                balloon.y = Math.max(padding, Math.min(canvas.height - padding, balloon.y));
+                if (balloon.x >= canvas.width - padding) isMovingForwards = false;
+                if (!isMovingForwards && balloon.x <= padding) {
                     saveTrialData().then(() => {
-                        trialNumber++;
-                        if (trialNumber > 10) {
-                            blockNumber++;
-                            trialNumber = 1;
-                        }
-                        if (blockNumber > 3) {
-                            currentPhase = PHASES.TEST;
-                            initClouds();
-                        } else {
-                            currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
-                            isMovingForwards = true;
-                            balloon.x = 100;
-                            trialStartTime = performance.now();
-                        }
+                        trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; }
+                        if (blockNumber > 3) { currentPhase = PHASES.TEST; initClouds(); }
+                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); }
                     });
                 }
             }
+            if (currentPhase === PHASES.EXPLORATION) { clouds.forEach(cloud => { let dist = Math.sqrt((balloon.x - cloud.x - cloud.width/2)**2 + (balloon.y - cloud.y - cloud.height/2)**2); if (dist < 100) revealCloud(cloud); }); }
+            timeSeriesData.push({ t: (now - startTime).toFixed(2), p: currentPitch.toFixed(2), h: currentHarmonicity.toFixed(4), bx: balloon.x.toFixed(2), by: balloon.y.toFixed(2), bvx: balloon.vx.toFixed(2), bvy: balloon.vy.toFixed(2), v: isVocalizing ? "True" : "False", gx: gazeX.toFixed(2), gy: gazeY.toFixed(2), groi: gazeROI, cond: currentCondition, phase: currentPhase });
+            if (currentCondition === "C1") trialTrajectoryToSave.push({timestamp_ms: now - trialStartTime, balloon_x: balloon.x, balloon_y: balloon.y});
 
-            // Eraser Mechanism in Exploration
-            if (currentPhase === PHASES.EXPLORATION) {
-                clouds.forEach(cloud => {
-                    let dist = Math.sqrt((balloon.x - cloud.x - cloud.width/2)**2 + (balloon.y - cloud.y - cloud.height/2)**2);
-                    if (dist < 100) revealCloud(cloud);
-                });
-            }
-
-            // Logging
-            const logEntry = {
-                t: (now - startTime).toFixed(2),
-                p: currentPitch.toFixed(2),
-                h: currentHarmonicity.toFixed(4),
-                bx: balloon.x.toFixed(2),
-                by: balloon.y.toFixed(2),
-                bvx: balloon.vx.toFixed(2),
-                bvy: balloon.vy.toFixed(2),
-                v: isVocalizing ? "True" : "False",
-                gx: gazeX.toFixed(2),
-                gy: gazeY.toFixed(2),
-                groi: gazeROI,
-                cond: currentCondition,
-                phase: currentPhase
-            };
-            timeSeriesData.push(logEntry);
-            if (currentCondition === "C1") {
-                trialTrajectoryToSave.push({timestamp_ms: now - trialStartTime, balloon_x: balloon.x, balloon_y: balloon.y});
-            }
-
-            // --- DRAWING ---
             ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.TEST) {
                 clouds.forEach(cloud => {
-                    // Draw Animal
-                    ctx.font = '80px Arial';
-                    ctx.fillText(cloud.animal.emoji, cloud.x + 50, cloud.y + 100);
-                    
-                    // Draw Cloud with Erase effect
-                    ctx.save();
-                    ctx.fillStyle = 'white';
-                    ctx.globalAlpha = 1 - (cloud.revealedPercent / 100);
-                    // Draw a cloud shape
-                    ctx.beginPath();
-                    ctx.arc(cloud.x + 50, cloud.y + 50, 60, 0, Math.PI * 2);
-                    ctx.arc(cloud.x + 120, cloud.y + 40, 70, 0, Math.PI * 2);
-                    ctx.arc(cloud.x + 190, cloud.y + 60, 60, 0, Math.PI * 2);
-                    ctx.arc(cloud.x + 120, cloud.y + 100, 60, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
+                    ctx.font = '80px Arial'; ctx.fillText(cloud.animal.emoji, cloud.x + 50, cloud.y + 100);
+                    ctx.save(); ctx.fillStyle = 'white'; ctx.globalAlpha = 1 - (cloud.revealedPercent / 100);
+                    ctx.beginPath(); ctx.arc(cloud.x + 50, cloud.y + 50, 60, 0, Math.PI * 2); ctx.arc(cloud.x + 120, cloud.y + 40, 70, 0, Math.PI * 2); ctx.arc(cloud.x + 190, cloud.y + 60, 60, 0, Math.PI * 2); ctx.arc(cloud.x + 120, cloud.y + 100, 60, 0, Math.PI * 2); ctx.fill(); ctx.restore();
                 });
             }
-
             drawHotAirBalloon(ctx, balloon.x, balloon.y, 0);
-            
-            // HUD
-            ctx.fillStyle = 'white'; ctx.font = '20px Arial';
-            ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30);
-            ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
-            if (currentCondition !== "C1" && yokedSource.p_id) {
-                ctx.fillText(`Yoked from: P${yokedSource.p_id} T${yokedSource.trial_n}`, 20, 90);
-            }
-        }
-
-        function drawGazeDebug(landmarks) {
-            ctx.save();
-            ctx.fillStyle = 'red';
-            ctx.beginPath();
-            ctx.arc(gazeX, gazeY, 10, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        }
-
-        function stopExperiment() {
-            experimentStarted = false;
-            location.reload();
+            if (testEyetrackingCheckbox.checked) { ctx.fillStyle = 'red'; ctx.beginPath(); ctx.arc(gazeX, gazeY, 10, 0, Math.PI * 2); ctx.fill(); }
+            ctx.fillStyle = 'white'; ctx.font = '20px Arial'; ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30); ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
         }
     </script>
 </body>

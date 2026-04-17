@@ -50,10 +50,10 @@ The server handles file saving and serves the experiment interface.
 ```bash
 python server.py
 ```
-By default, the server runs on `http://localhost:5000`.
+By default, the server runs on `http://localhost:5001`.
 
 ### 2. Access the Interface
-1. Open your browser and navigate to `http://localhost:5000`.
+1. Open your browser and navigate to `http://localhost:5001`.
 2. Enter the **Participant Number** and select the **Group Assignment**.
 3. Toggle "Test eyetracking setup" if you need to calibrate the webcam.
 4. Click **Start Experiment**.

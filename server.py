@@ -87,7 +87,7 @@ def save_data():
     return jsonify({"status": "success", "message": f"Saved {filename}"})
 
 if __name__ == '__main__':
-    print(f"Server starting on http://localhost:5000")
+    print(f"Server starting on http://localhost:5001")
     print(f"Data Dir: {DATA_DIR}")
     print(f"Trajectories Dir: {TRAJECTORIES_DIR}")
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)
