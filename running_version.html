@@ -95,7 +95,7 @@
         let experimentStarted = false;
         
         const MIN_PITCH = 150; 
-        const MAX_PITCH = 1200; 
+        const MAX_PITCH = 600; // Lowered from 1200 to make it easier to reach the top
         const APERIODICITY_THRESHOLD = 0.2; 
         
         let balloon = { x: 100, y: canvas.height / 2, angle: 0, vx: 0, vy: 0 };
@@ -297,8 +297,12 @@
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
                 if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
                     moving = true;
-                    let targetY = canvas.height - ((currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * canvas.height);
-                    balloon.vy = (targetY - balloon.y) * 0.1;
+                    // Map pitch to Y within padded area
+                    const padding = 50;
+                    let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+                    norm = Math.max(0, Math.min(1, norm));
+                    let tY = (canvas.height - padding * 2) * (1 - norm) + padding;
+                    balloon.vy = (tY - balloon.y) * 0.1;
                 }
             }
             if (moving && currentPhase !== PHASES.TEST) {
