@@ -31,9 +31,8 @@
             background-color: #FF4500; box-shadow: 0 4px 0 #B22222; display: none; z-index: 100;
         }
         canvas { display: block; width: 100vw; height: 100vh; }
-        #webcam-preview {
-            position: absolute; bottom: 20px; left: 20px; width: 200px; border: 4px solid white;
-            border-radius: 10px; z-index: 50; display: none;
+        #webcam-container {
+            position: absolute; bottom: 20px; left: 20px; width: 240px; height: 180px; display: none; z-index: 50; border: 4px solid white; border-radius: 10px; overflow: hidden;
         }
     </style>
 </head>
@@ -61,7 +60,10 @@
     </div>
 
     <button id="stopButton">Stop & Save Data</button>
-    <video id="webcam-preview" autoplay playsinline muted></video>
+    <div id="webcam-container">
+        <video id="webcam-preview" autoplay playsinline muted style="display: none;"></video>
+        <canvas id="webcam-canvas" width="240" height="180" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
+    </div>
     <canvas id="visualizer"></canvas>
 
     <script>
@@ -69,6 +71,9 @@
         const stopButton = document.getElementById('stopButton');
         const uiContainer = document.getElementById('ui-container');
         const webcamPreview = document.getElementById('webcam-preview');
+        const webcamCanvas = document.getElementById('webcam-canvas');
+        const webcamCtx = webcamCanvas.getContext('2d');
+        const webcamContainer = document.getElementById('webcam-container');
         const testEyetrackingCheckbox = document.getElementById('testEyetracking');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
@@ -95,7 +100,7 @@
         let experimentStarted = false;
         
         const MIN_PITCH = 150; 
-        const MAX_PITCH = 600; // Lowered from 1200 to make it easier to reach the top
+        const MAX_PITCH = 600; 
         const APERIODICITY_THRESHOLD = 0.2; 
         
         let balloon = { x: 100, y: canvas.height / 2, angle: 0, vx: 0, vy: 0 };
@@ -124,10 +129,10 @@
         let particles = [];
         let isMovingForwards = true;
 
-        // --- REFINED EYE TRACKING ---
+        // --- IMPROVED EYE TRACKING ---
         let gazeX = 0, gazeY = 0, gazeROI = null;
-        let smoothedGazeX = 0, smoothedGazeY = 0;
-        const GAZE_SMOOTHING = 0.15; 
+        let smoothedGazeX = canvas.width / 2, smoothedGazeY = canvas.height / 2;
+        const GAZE_SMOOTHING = 0.12; 
         let faceMesh;
 
         async function initEyeTracking() {
@@ -138,13 +143,33 @@
             camera.start();
         }
 
+        function drawLandmarks(landmarks) {
+            webcamCtx.save();
+            webcamCtx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
+            webcamCtx.drawImage(webcamPreview, 0, 0, webcamCanvas.width, webcamCanvas.height);
+            webcamCtx.fillStyle = '#00FF00';
+            for (const point of landmarks) {
+                webcamCtx.beginPath();
+                webcamCtx.arc(point.x * webcamCanvas.width, point.y * webcamCanvas.height, 1, 0, Math.PI * 2);
+                webcamCtx.fill();
+            }
+            webcamCtx.restore();
+        }
+
         function onFaceMeshResults(results) {
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
+                if (testEyetrackingCheckbox.checked) drawLandmarks(landmarks);
+
                 const leftIris = landmarks[468], leftInner = landmarks[133], leftOuter = landmarks[33];
+                const leftTop = landmarks[159], leftBottom = landmarks[145];
+                
                 const x_ratio = (leftIris.x - leftOuter.x) / (leftInner.x - leftOuter.x);
-                const rawGazeX = (1 - (x_ratio - 0.2) / 0.6) * canvas.width;
-                const rawGazeY = landmarks[1].y * canvas.height;
+                const y_ratio = (leftIris.y - leftTop.y) / (leftBottom.y - leftTop.y);
+                
+                const rawGazeX = ((x_ratio - 0.35) / 0.3) * canvas.width;
+                const rawGazeY = ((y_ratio - 0.4) / 0.2) * canvas.height;
+
                 smoothedGazeX += GAZE_SMOOTHING * (rawGazeX - smoothedGazeX);
                 smoothedGazeY += GAZE_SMOOTHING * (rawGazeY - smoothedGazeY);
                 gazeX = smoothedGazeX; gazeY = smoothedGazeY;
@@ -241,7 +266,8 @@
             try {
                 const constraints = { audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }, video: { width: 640, height: 480 } };
                 micStream = await navigator.mediaDevices.getUserMedia(constraints);
-                webcamPreview.srcObject = micStream; if (testEyetrackingCheckbox.checked) webcamPreview.style.display = 'block';
+                webcamPreview.srcObject = micStream; 
+                if (testEyetrackingCheckbox.checked) webcamContainer.style.display = 'block';
                 audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; microphone = audioContext.createMediaStreamSource(micStream); microphone.connect(analyser);
                 uiContainer.style.display = 'none'; stopButton.style.display = 'block';
                 await initEyeTracking();
@@ -297,7 +323,6 @@
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
                 if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
                     moving = true;
-                    // Map pitch to Y within padded area
                     const padding = 50;
                     let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
                     norm = Math.max(0, Math.min(1, norm));
