@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Baby Pitch Agency - Research Edition (v15_04)</title>
+    <!-- MediaPipe Face Mesh -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <style>
@@ -97,13 +98,15 @@
         const PHASES = { BASELINE: 'BASELINE', EXPLORATION: 'EXPLORATION', TEST: 'TEST' };
         let currentPhase = PHASES.BASELINE;
         let experimentStarted = false;
+        let isTestIntro = false;
+        let testIntroAnimal = null;
         
         // --- IMPROVED PITCH SETTINGS ---
         const MIN_PITCH = 150; 
         const MAX_PITCH = 600; 
         const APERIODICITY_THRESHOLD = 0.2; 
-        const VOLUME_THRESHOLD = 0.01; // Noise gate
-        let pitchHistory = []; // For median smoothing
+        const VOLUME_THRESHOLD = 0.01; 
+        let pitchHistory = []; 
         
         let balloon = { x: 100, y: canvas.height / 2, angle: 0, vx: 0, vy: 0 };
         let targetY = canvas.height / 2;
@@ -149,9 +152,7 @@
             webcamCtx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
             webcamCtx.drawImage(webcamPreview, 0, 0, webcamCanvas.width, webcamCanvas.height);
             webcamCtx.fillStyle = '#00FF00';
-            for (const point of landmarks) {
-                webcamCtx.beginPath(); webcamCtx.arc(point.x * webcamCanvas.width, point.y * webcamCanvas.height, 1, 0, Math.PI * 2); webcamCtx.fill();
-            }
+            for (const point of landmarks) { webcamCtx.beginPath(); webcamCtx.arc(point.x * webcamCanvas.width, point.y * webcamCanvas.height, 1, 0, Math.PI * 2); webcamCtx.fill(); }
             webcamCtx.restore();
         }
 
@@ -176,24 +177,20 @@
             clouds.forEach(cloud => {
                 if (x > cloud.x && x < cloud.x + cloud.width && y > cloud.y && y < cloud.y + cloud.height) {
                     gazeROI = cloud.id;
-                    if (currentPhase === PHASES.TEST) revealCloud(cloud, true);
+                    if (currentPhase === PHASES.TEST && !isTestIntro) revealCloud(cloud, true);
                 }
             });
         }
 
         function revealCloud(cloud, isGaze = false) {
-            // Mask-based reveal logic
-            const revealRadius = isGaze ? 40 : 60;
+            const revealRadius = isGaze ? 40 : 70;
             const maskCtx = cloud.maskCanvas.getContext('2d');
             maskCtx.globalCompositeOperation = 'destination-out';
             maskCtx.beginPath();
-            // Map balloon/gaze relative to cloud
             const relX = (isGaze ? gazeX : balloon.x) - cloud.x;
             const relY = (isGaze ? gazeY : balloon.y) - cloud.y;
             maskCtx.arc(relX, relY, revealRadius, 0, Math.PI * 2);
             maskCtx.fill();
-
-            // Calculate percentage
             if (!cloud.soundPlayed) {
                 const pixels = maskCtx.getImageData(0, 0, cloud.width, cloud.height).data;
                 let transparent = 0;
@@ -221,15 +218,9 @@
             const shuffledAnimals = [...ANIMALS].sort(() => Math.random() - 0.5);
             clouds = regions.map((reg, i) => {
                 const cloudW = 250, cloudH = 150;
-                const mCanvas = document.createElement('canvas');
-                mCanvas.width = cloudW; mCanvas.height = cloudH;
-                const mCtx = mCanvas.getContext('2d');
-                mCtx.fillStyle = 'white';
-                // Draw fluffy cloud
-                mCtx.beginPath();
-                mCtx.arc(50, 50, 60, 0, Math.PI * 2); mCtx.arc(120, 40, 70, 0, Math.PI * 2);
-                mCtx.arc(190, 60, 60, 0, Math.PI * 2); mCtx.arc(120, 100, 60, 0, Math.PI * 2);
-                mCtx.fill();
+                const mCanvas = document.createElement('canvas'); mCanvas.width = cloudW; mCanvas.height = cloudH;
+                const mCtx = mCanvas.getContext('2d'); mCtx.fillStyle = 'white';
+                mCtx.beginPath(); mCtx.arc(50, 50, 60, 0, Math.PI * 2); mCtx.arc(120, 40, 70, 0, Math.PI * 2); mCtx.arc(190, 60, 60, 0, Math.PI * 2); mCtx.arc(120, 100, 60, 0, Math.PI * 2); mCtx.fill();
                 return { id: reg.id, x: reg.x + Math.random() * (reg.w - cloudW), y: reg.y + Math.random() * (reg.h - cloudH), width: cloudW, height: cloudH, maskCanvas: mCanvas, revealedPercent: 0, animal: shuffledAnimals[i], soundPlayed: false };
             });
         }
@@ -295,6 +286,13 @@
         stopButton.addEventListener('click', async () => { await stopExperiment(); });
         async function stopExperiment() { if (!experimentStarted) return; experimentStarted = false; await saveTrialData(true); alert("Experiment Finished."); location.reload(); }
 
+        function startTestPhase() {
+            currentPhase = PHASES.TEST; isTestIntro = true;
+            testIntroAnimal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+            playSound(testIntroAnimal.sound);
+            setTimeout(() => { isTestIntro = false; initClouds(); }, 3000);
+        }
+
         async function fetchYokedTrajectory() {
             try {
                 const response = await fetch(`/api/get_yoked_trajectory?participant_id=${participantId}&trial_number=${trialNumber}`);
@@ -314,92 +312,49 @@
             if (!experimentStarted) return;
             requestAnimationFrame(drawLoop);
             const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
-            
-            // --- VOLUME CALC (Noise Gate) ---
             let sum = 0; for(let i=0; i<buffer.length; i++) sum += buffer[i]*buffer[i];
             const rms = Math.sqrt(sum/buffer.length);
-            
             const result = yinAlgorithm(buffer, audioContext.sampleRate);
             let isVocalizing = false; let now = performance.now();
-            
             if (rms > VOLUME_THRESHOLD && result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) {
-                // Pitch Smoothing (Median of last 5)
                 pitchHistory.push(result.pitch); if (pitchHistory.length > 5) pitchHistory.shift();
                 const sorted = [...pitchHistory].sort((a,b) => a-b);
-                currentPitch = sorted[Math.floor(sorted.length/2)];
-                currentHarmonicity = 1.0 - result.aperiodicity;
-                isVocalizing = true; lastVocalTime = now;
+                currentPitch = sorted[Math.floor(sorted.length/2)]; currentHarmonicity = 1.0 - result.aperiodicity; isVocalizing = true; lastVocalTime = now;
             }
-
             if (isVocalizing && !lastIsVocalizing) { vocalizationCount++; if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) { currentPhase = PHASES.EXPLORATION; initClouds(); if (currentCondition !== "C1") fetchYokedTrajectory(); } }
             lastIsVocalizing = isVocalizing;
-            
             let timeSinceVocal = now - lastVocalTime; let moving = false;
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
                 if (currentCondition === "C1" || currentPhase === PHASES.BASELINE) {
                     if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
-                        moving = true;
-                        const padding = 60;
-                        let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
+                        moving = true; const padding = 60; let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
                         let tY = (canvas.height - padding * 2) * (1 - Math.max(0, Math.min(1, norm))) + padding;
                         balloon.vy = (tY - balloon.y) * 0.15;
                     } else { balloon.vy *= 0.9; }
                 } else if ((currentCondition === "C2" || currentCondition === "C3") && yokedTrajectoryData) {
-                    if (currentCondition === "C3" || isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
-                        moving = true; const d = yokedTrajectoryData[yokedIndex];
-                        balloon.x = d.balloon_x; balloon.y = d.balloon_y;
-                        yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
-                    }
+                    if (currentCondition === "C3" || isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) { moving = true; const d = yokedTrajectoryData[yokedIndex]; balloon.x = d.balloon_x; balloon.y = d.balloon_y; yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1); }
                 }
             }
-
             if (moving && currentPhase !== PHASES.TEST && (currentCondition === "C1" || currentPhase === PHASES.BASELINE)) {
                 balloon.vx = isMovingForwards ? 4 : -4; balloon.x += balloon.vx; balloon.y += balloon.vy;
-                const padding = 50;
-                balloon.x = Math.max(padding, Math.min(canvas.width - padding, balloon.x));
-                balloon.y = Math.max(padding, Math.min(canvas.height - padding, balloon.y));
+                const padding = 50; balloon.x = Math.max(padding, Math.min(canvas.width - padding, balloon.x)); balloon.y = Math.max(padding, Math.min(canvas.height - padding, balloon.y));
                 if (balloon.x >= canvas.width - padding) isMovingForwards = false;
                 if (!isMovingForwards && balloon.x <= padding) {
-                    saveTrialData().then(() => {
-                        trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; }
-                        if (blockNumber > 3) { currentPhase = PHASES.TEST; initClouds(); }
-                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); }
-                    });
+                    saveTrialData().then(() => { trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; } if (blockNumber > 3) startTestPhase(); else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); } });
                 }
             } else if (moving && (currentCondition === "C2" || currentCondition === "C3")) {
-                if (yokedIndex >= yokedTrajectoryData.length - 1) {
-                    saveTrialData().then(() => {
-                        trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; }
-                        if (blockNumber > 3) { currentPhase = PHASES.TEST; initClouds(); }
-                        else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); }
-                    });
-                }
+                if (yokedIndex >= yokedTrajectoryData.length - 1) { saveTrialData().then(() => { trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; } if (blockNumber > 3) startTestPhase(); else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); } }); }
             }
-
             let activeRevealId = null, activeRevealPct = 0;
-            if (currentPhase === PHASES.EXPLORATION) {
-                clouds.forEach(cloud => {
-                    let dist = Math.sqrt((balloon.x - (cloud.x + cloud.width/2))**2 + (balloon.y - (cloud.y + cloud.height/2))**2);
-                    if (dist < 120) { revealCloud(cloud); activeRevealId = cloud.id; activeRevealPct = cloud.revealedPercent; }
-                });
-            }
-
+            if (currentPhase === PHASES.EXPLORATION) { clouds.forEach(cloud => { let dist = Math.sqrt((balloon.x - (cloud.x + cloud.width/2))**2 + (balloon.y - (cloud.y + cloud.height/2))**2); if (dist < 120) { revealCloud(cloud); activeRevealId = cloud.id; activeRevealPct = cloud.revealedPercent; } }); }
             timeSeriesData.push({ t_absolute: (now - startTime).toFixed(2), t_elapsed: (now - trialStartTime).toFixed(2), p: currentPitch.toFixed(2), h: currentHarmonicity.toFixed(4), bx: balloon.x.toFixed(2), by: balloon.y.toFixed(2), bvx: balloon.vx.toFixed(2), bvy: balloon.vy.toFixed(2), v: isVocalizing ? "True" : "False", gx: gazeX.toFixed(2), gy: gazeY.toFixed(2), groi: gazeROI === null ? "null" : gazeROI, reveal_id: activeRevealId === null ? "null" : activeRevealId, reveal_pct: activeRevealPct.toFixed(2), phase: currentPhase });
             if (currentCondition === "C1") trialTrajectoryToSave.push({timestamp_ms: now - trialStartTime, balloon_x: balloon.x, balloon_y: balloon.y});
-
             ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.TEST) {
-                clouds.forEach(cloud => {
-                    ctx.font = '80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                    ctx.fillText(cloud.animal.emoji, cloud.x + cloud.width/2, cloud.y + cloud.height/2);
-                    ctx.drawImage(cloud.maskCanvas, cloud.x, cloud.y);
-                });
-            }
+            if (isTestIntro && testIntroAnimal) { ctx.font = '120px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(testIntroAnimal.emoji, canvas.width/2, canvas.height/2); }
+            else if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.TEST) { clouds.forEach(cloud => { ctx.font = '80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(cloud.animal.emoji, cloud.x + cloud.width/2, cloud.y + cloud.height/2); ctx.drawImage(cloud.maskCanvas, cloud.x, cloud.y); }); }
             drawHotAirBalloon(ctx, balloon.x, balloon.y, 0);
             if (testEyetrackingCheckbox.checked) { ctx.fillStyle = 'red'; ctx.beginPath(); ctx.arc(gazeX, gazeY, 10, 0, Math.PI * 2); ctx.fill(); }
-            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = '20px Arial';
-            ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30);
-            ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
+            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = '20px Arial'; ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30); ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
         }
     </script>
 </body>
