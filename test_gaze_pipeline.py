@@ -79,13 +79,18 @@ def process_video(input_path, output_path):
         print(f"Error: Could not open VideoWriter for {output_path}")
         return
 
-    print(f"Starting Pipeline...")
+    # Temporal Smoothing (Matching JS GAZE_SMOOTHING = 0.12)
+    smoothed_gaze_x = actual_width / 2
+    smoothed_gaze_y = actual_height / 2
+    GAZE_SMOOTHING = 0.12
+
+    print(f"Starting Pipeline (Binocular + Smoothing)...")
     print(f"Processing: {input_path}")
     print(f"Resolution: {actual_width}x{actual_height} | FPS: {fps}")
 
     frame_count = 0
     # Process the first frame we already read
-    def process_frame(frame):
+    def process_frame(frame, current_smoothed_x, current_smoothed_y):
         # Convert to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
@@ -94,44 +99,53 @@ def process_video(input_path, output_path):
             for face_landmarks in results.multi_face_landmarks:
                 landmarks = face_landmarks.landmark
                 
-                # --- EXACT GAZE ESTIMATION LOGIC FROM EXPERIMENT ---
-                li = landmarks[468] # Iris
-                lin = landmarks[133] # Inner
-                lo = landmarks[33]  # Outer
-                lt = landmarks[159] # Top
-                lb = landmarks[145] # Bottom
+                # --- BINOCULAR GAZE ESTIMATION ---
+                # Left Eye: Iris 468, Inner 133, Outer 33, Top 159, Bottom 145
+                # Right Eye: Iris 473, Inner 362, Outer 263, Top 386, Bottom 374
+                
+                # 1. Left Eye Ratios
+                lx_ratio = (landmarks[468].x - landmarks[33].x) / (landmarks[133].x - landmarks[33].x)
+                ly_ratio = (landmarks[468].y - landmarks[159].y) / (landmarks[145].y - landmarks[159].y)
 
-                x_ratio = (li.x - lo.x) / (lin.x - lo.x)
-                y_ratio = (li.y - lt.y) / (lb.y - lt.y)
+                # 2. Right Eye Ratios
+                rx_ratio = (landmarks[473].x - landmarks[263].x) / (landmarks[362].x - landmarks[263].x)
+                ry_ratio = (landmarks[473].y - landmarks[386].y) / (landmarks[374].y - landmarks[386].y)
 
-                gaze_x = int(((x_ratio - 0.35) / 0.3) * actual_width)
-                gaze_y = int(((y_ratio - 0.4) / 0.2) * actual_height)
+                # 3. Average Ratios (Binocular Fusion)
+                avg_x_ratio = (lx_ratio + rx_ratio) / 2
+                avg_y_ratio = (ly_ratio + ry_ratio) / 2
 
-                gaze_x = max(0, min(actual_width, gaze_x))
-                gaze_y = max(0, min(actual_height, gaze_y))
+                # 4. Map to Screen (with experimental offsets)
+                raw_gaze_x = ((avg_x_ratio - 0.35) / 0.3) * actual_width
+                raw_gaze_y = ((avg_y_ratio - 0.4) / 0.2) * actual_height
+
+                # 5. Temporal Smoothing (Exponential Moving Average)
+                current_smoothed_x += GAZE_SMOOTHING * (raw_gaze_x - current_smoothed_x)
+                current_smoothed_y += GAZE_SMOOTHING * (raw_gaze_y - current_smoothed_y)
+                
+                gaze_x = int(max(0, min(actual_width, current_smoothed_x)))
+                gaze_y = int(max(0, min(actual_height, current_smoothed_y)))
 
                 # --- VISUALIZATION ---
-                # 1. Draw Mesh Landmarks (Slightly larger Green dots)
+                # Subtle Mesh
                 for lm in landmarks:
-                    px = int(lm.x * actual_width)
-                    py = int(lm.y * actual_height)
-                    cv2.circle(frame, (px, py), 2, (0, 200, 0), -1)
+                    cv2.circle(frame, (int(lm.x * actual_width), int(lm.y * actual_height)), 1, (0, 150, 0), -1)
 
-                # 2. Highlight Gaze Source Points (Much larger Blue dots)
-                for idx in [468, 133, 33, 159, 145]:
+                # Eye Highlights (Both Eyes)
+                for idx in [468, 133, 33, 159, 145, 473, 362, 263, 386, 374]:
                     pt = landmarks[idx]
-                    cv2.circle(frame, (int(pt.x * actual_width), int(pt.y * actual_height)), 8, (255, 0, 0), -1)
+                    cv2.circle(frame, (int(pt.x * actual_width), int(pt.y * actual_height)), 5, (255, 0, 0), -1)
 
-                cv2.circle(frame, (gaze_x, gaze_y), 20, (0, 0, 255), 3)
-                cv2.circle(frame, (gaze_x, gaze_y), 5, (0, 0, 255), -1)
+                # Smoothed Gaze Target
+                cv2.circle(frame, (gaze_x, gaze_y), 25, (0, 0, 255), 3)
+                cv2.circle(frame, (gaze_x, gaze_y), 8, (0, 0, 255), -1)
                 
-                cv2.putText(frame, f"GAZE: ({gaze_x}, {gaze_y})", (gaze_x + 25, gaze_y), 
+                cv2.putText(frame, f"SMOOTHED GAZE", (gaze_x + 30, gaze_y), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.putText(frame, f"X-Ratio: {x_ratio:.2f} | Y-Ratio: {y_ratio:.2f}", (30, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        return frame
+                
+        return frame, current_smoothed_x, current_smoothed_y
 
-    frame = process_frame(first_frame)
+    frame, smoothed_gaze_x, smoothed_gaze_y = process_frame(first_frame, smoothed_gaze_x, smoothed_gaze_y)
     out.write(frame)
     frame_count += 1
 
@@ -140,7 +154,7 @@ def process_video(input_path, output_path):
         if not ret:
             break
         
-        frame = process_frame(frame)
+        frame, smoothed_gaze_x, smoothed_gaze_y = process_frame(frame, smoothed_gaze_x, smoothed_gaze_y)
         out.write(frame)
         frame_count += 1
         
