@@ -73,14 +73,20 @@ def get_yoked_trajectory():
 def save_data():
     # Used for CSV logs, videos (WebM), and audio (WAV)
     p_id = request.form.get('participant_id')
-    file_type = request.form.get('file_type') # 'csv', 'webm', or 'wav'
+    file_type = request.form.get('file_type', 'data') # e.g., 'csv_G1', 'webm_webcam_G2'
     trial_n = request.form.get('trial_number', 'full')
     
     if 'file' not in request.files:
         return jsonify({"status": "error", "message": "No file part"}), 400
         
     file = request.files['file']
-    filename = f"participant_{p_id}_trial_{trial_n}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_type}"
+    
+    # Extract extension (e.g., 'csv_G1' -> 'csv')
+    extension = file_type.split('_')[0] if file_type else 'data'
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Construct filename: participant_001_trial_1_20260420_120000_csv_G1.csv
+    filename = f"participant_{p_id}_trial_{trial_n}_{timestamp}_{file_type}.{extension}"
     filepath = os.path.join(DATA_DIR, filename)
     
     file.save(filepath)
