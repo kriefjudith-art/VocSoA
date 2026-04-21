@@ -284,7 +284,17 @@
             }
         }
 
-        function playSound(soundFile) { new Audio(`/VocSoA/sounds/${soundFile}`).play(); }
+        function playSound(soundFile) { 
+            // Try specific VocSoA route first, then fallback to general sounds
+            const audio = new Audio(`/VocSoA/sounds/${soundFile}`);
+            audio.onerror = () => {
+                new Audio(`/sounds/${soundFile}`).play().catch(e => console.error("Sound play failed:", e));
+            };
+            audio.play().catch(e => {
+                // If it fails immediately (e.g. 404), try fallback
+                new Audio(`/sounds/${soundFile}`).play().catch(err => console.error("Sound play failed:", err));
+            });
+        }
 
         function determineCondition(group, block, p_id) {
             if (p_id === '1' || p_id === 1) return 'C1';

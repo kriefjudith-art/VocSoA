@@ -167,11 +167,13 @@ def process_video(input_path, output_path):
     print(f"\nSuccess! Processed video saved to: {output_path}")
 
 if __name__ == "__main__":
-    INPUT_VIDEO = "video/sample_input.mp4"
-    OUTPUT_VIDEO = "video/gaze_pipeline_test_output.mp4"
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    INPUT_VIDEO = os.path.join(BASE_DIR, "../../video/sample_input.mp4")
+    OUTPUT_VIDEO = os.path.join(BASE_DIR, "../../video/gaze_pipeline_test_output.mp4")
     
     # Ensure video directory exists
-    if not os.path.exists('video'):
-        os.makedirs('video')
+    video_dir = os.path.join(BASE_DIR, "../../video")
+    if not os.path.exists(video_dir):
+        os.makedirs(video_dir)
         
     process_video(INPUT_VIDEO, OUTPUT_VIDEO)

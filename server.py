@@ -9,12 +9,15 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 TRAJECTORIES_DIR = os.path.join(BASE_DIR, 'trajectories')
-SOUNDS_DIR = os.path.join(BASE_DIR, 'VocSoA', 'sounds')
+SOUNDS_DIR = os.path.join(BASE_DIR, 'assets', 'sounds')
+VOCSOA_SOUNDS_DIR = os.path.join(BASE_DIR, 'assets', 'VocSoA', 'sounds')
 
 # Ensure directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TRAJECTORIES_DIR, exist_ok=True)
 os.makedirs(SOUNDS_DIR, exist_ok=True)
+os.makedirs(VOCSOA_SOUNDS_DIR, exist_ok=True)
+os.makedirs(IMAGES_DIR, exist_ok=True)
 
 @app.route('/')
 def index():
@@ -22,23 +25,23 @@ def index():
 
 @app.route('/webgazer')
 def webgazer():
-    return send_from_directory(BASE_DIR, 'webgazer_experiment.html')
-
-@app.route('/webgazer_v2')
-def webgazer_v2():
-    return send_from_directory(BASE_DIR, 'webgazer_v2.html')
-
-@app.route('/webgazer_v3')
-def webgazer_v3():
-    return send_from_directory(BASE_DIR, 'webgazer_v3.html')
+    return send_from_directory(os.path.join(BASE_DIR, 'demos', 'web'), 'webgazer_experiment.html')
 
 @app.route('/precision')
 def precision():
-    return send_from_directory(BASE_DIR, 'precision_js_tracker.html')
+    return send_from_directory(os.path.join(BASE_DIR, 'demos', 'web'), 'precision_js_tracker.html')
+
+@app.route('/sounds/<path:filename>')
+def serve_general_sounds(filename):
+    return send_from_directory(SOUNDS_DIR, filename)
 
 @app.route('/VocSoA/sounds/<path:filename>')
 def serve_sounds(filename):
-    return send_from_directory(SOUNDS_DIR, filename)
+    return send_from_directory(VOCSOA_SOUNDS_DIR, filename)
+
+@app.route('/images/<path:filename>')
+def serve_images(filename):
+    return send_from_directory(IMAGES_DIR, filename)
 
 @app.route('/api/save_trajectory', methods=['POST'])
 def save_trajectory():

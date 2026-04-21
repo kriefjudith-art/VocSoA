@@ -26,8 +26,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
-# Add owlet_repo to path so we can import eyetracker
-sys.path.append(os.path.abspath("owlet_repo"))
+# Path setup for Owlet
+OWLET_DIR = os.path.join(os.path.dirname(__file__), 'owlet_repo')
+sys.path.append(OWLET_DIR)
 from eyetracker.gaze_tracking import GazeTracking
 
 # --- CONFIG ---
@@ -43,7 +44,7 @@ STIM_DURATION = 1.2
 
 class OwletGazeSystem:
     def __init__(self):
-        cwd = os.path.abspath("owlet_repo")
+        cwd = OWLET_DIR
         # Initialize Owlet GazeTracking with default baby-ish parameters
         # mean=2.7, max=4, min=1, ratio=1
         self.gaze = GazeTracking(2.7, 4, 1, 1, cwd)

@@ -22,7 +22,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
 # Path setup for Owlet
-sys.path.append(os.path.abspath("owlet_repo"))
+OWLET_DIR = os.path.join(os.path.dirname(__file__), 'owlet_repo')
+sys.path.append(OWLET_DIR)
 from eyetracker.gaze_tracking import GazeTracking
 
 # --- CONFIG ---
@@ -38,7 +39,7 @@ STIM_DURATION = 1.2
 
 class OwletPrecisionSystem:
     def __init__(self):
-        cwd = os.path.abspath("owlet_repo")
+        cwd = OWLET_DIR
         self.gaze = GazeTracking(2.7, 4, 1, 1, cwd)
         self.raw_data = {pos: [] for pos in TARGET_POSITIONS}
         self.trained_model = None

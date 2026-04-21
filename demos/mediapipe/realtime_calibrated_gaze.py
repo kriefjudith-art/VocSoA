@@ -31,7 +31,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
 # --- CONFIG ---
-MODEL_PATH = 'face_landmarker.task'
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '../../face_landmarker.task')
 SCREEN_WIDTH, SCREEN_HEIGHT = 1920, 1080 
 TARGET_POSITIONS = [
     (0.5, 0.5), (0.1, 0.1), (0.5, 0.5), (0.5, 0.1), 
