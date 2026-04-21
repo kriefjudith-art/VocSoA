@@ -20,6 +20,22 @@ os.makedirs(SOUNDS_DIR, exist_ok=True)
 def index():
     return send_from_directory(BASE_DIR, 'running_version.html')
 
+@app.route('/webgazer')
+def webgazer():
+    return send_from_directory(BASE_DIR, 'webgazer_experiment.html')
+
+@app.route('/webgazer_v2')
+def webgazer_v2():
+    return send_from_directory(BASE_DIR, 'webgazer_v2.html')
+
+@app.route('/webgazer_v3')
+def webgazer_v3():
+    return send_from_directory(BASE_DIR, 'webgazer_v3.html')
+
+@app.route('/precision')
+def precision():
+    return send_from_directory(BASE_DIR, 'precision_js_tracker.html')
+
 @app.route('/VocSoA/sounds/<path:filename>')
 def serve_sounds(filename):
     return send_from_directory(SOUNDS_DIR, filename)

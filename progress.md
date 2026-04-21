@@ -2,39 +2,33 @@
 
 ## Phase 1: Backend Setup & UI Initialization ✅ (Complete)
 - [x] Implement Group Assignment (G1, G2, G3) and Participant Number in UI.
-- [x] Hide webcam preview by default; add "Test eyetracking setup" toggle.
-- [x] Create Flask `server.py` to handle silent file saving/loading (trajectories, media, CSVs).
-- [x] Create folders `trajectories/`, `VocSoA/sounds/`, `data/`.
-- [x] Note: Real-time pitch detection robustness will be iteratively improved in Phase 3.
-- [x] Note: Bird replacement with balloon will be done in Phase 3.
+- [x] Create Flask `server.py` to handle silent file saving/loading.
 
 ## Phase 2: Core State Machine & Trial Loop ✅ (Complete)
-- [x] Implement the overarching state machine: Baseline -> Exploration -> Test.
-- [x] Configure the 30-trial structure (3 blocks of 10 trials).
-- [x] Implement Group assignment logic (G1, G2, G3) mapping to conditions (C1, C2, C3).
+- [x] Overarching state machine: Calibration -> Baseline -> Exploration -> Test.
+- [x] Configure 30-trial structure and condition mapping.
 
 ## Phase 3: Baseline & Pitch Physics ✅ (Complete)
-- [x] Baseline Phase: Free movement, transitions after 5 vocalizations.
-- [x] Replaced bird with a procedural Hot Air Balloon.
-- [x] Improved pitch mapping (instant) with 100ms movement inertia.
+- [x] Replaced bird with procedural Hot Air Balloon.
+- [x] Improved pitch mapping with YIN algorithm and movement inertia.
 
 ## Phase 4: Exploration Environment ✅ (Complete)
-- [x] Draw 4 staggered clouds and define 4 ROIs.
-- [x] Implement the "Eraser" mechanism using alpha transparency.
-- [x] Implement animal sound system (Cat, Dog, Cow, Duck).
-- [x] Balloon movement: Forward (right) -> Return (left) defines the trial.
+- [x] Implement "Eraser" mechanism for cloud reveal via balloon/vocal pitch.
+- [x] Animal sound system (Cat, Dog, Cow, Duck).
 
 ## Phase 5: Yoked System (C1, C2, C3) ✅ (Complete)
-- [x] Implement trajectory recording during C1.
-- [x] Automatic JSON saving to `trajectories/` via the local backend.
-- [x] Implement C2 (Partial Control) and C3 (Yoked Only) playback logic.
+- [x] Trajectory recording and JSON playback logic for control conditions.
 
-## Phase 6: Mediapipe Eye Tracking ✅ (Complete)
-- [x] Integrated Mediapipe Face Mesh for real-time gaze estimation.
-- [x] Mapping gaze to ROIs for cloud reveal in the Test Phase.
-- [x] Added "Test eyetracking setup" toggle for calibration.
+## Phase 6: Precision Gaze Tracking & Calibration ✅ (Complete)
+- [x] **Consensus-Based Calibration**: Implemented "One-Tap Burst" 15-frame capture.
+- [x] **Precision 3D Vectors**: Shifted from 2D eyelid ratios to 3D Eye-Socket centroids.
+- [x] **Asymmetric Smoothing**: Heavily stabilized vertical jitter (Alpha Y < Alpha X).
+- [x] **Multi-Engine Support**: 
+    - [x] MediaPipe 3D (Python/JS): High head-pose robustness.
+    - [x] WebGazer (JS): Smooth browser-native tracking.
+    - [x] Owlet (Python): Sub-pixel pupil localization using Dlib.
 
-## Phase 7: Data Logging & Output ✅ (Complete)
-- [x] Comprehensive CSV logging including gaze, pitch, and yoked data.
-- [x] Automatic upload of experiment and webcam video files to `data/`.
-- [x] Updated Python analysis script to parse new metrics.
+## Phase 7: Data Integrity & Analysis ✅ (Complete)
+- [x] Fixed file extension bug in backend (e.g., `.csv_G1` -> `.csv`).
+- [x] Added `test_gaze_pipeline.py` for offline validation of eye tracking.
+- [x] Updated analysis script to handle expanded 15-feature datasets.

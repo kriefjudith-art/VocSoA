@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Baby Precision Tracker - V3 Stable</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjs@11.8.0/lib/browser/math.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #050505; font-family: monospace; color: #eee; }
+        #target { position: absolute; font-size: 80px; z-index: 100; pointer-events: none; }
+        #gaze-dot { 
+            position: absolute; width: 35px; height: 35px; background-color: #00FF00; 
+            border: 3px solid white; border-radius: 50%; display: none; z-index: 999;
+            box-shadow: 0 0 20px #0f0;
+        }
+        #stealth-hud { 
+            position: absolute; bottom: 10px; right: 10px; width: 20px; height: 20px; 
+            background-color: red; border-radius: 50%; z-index: 1000; border: 2px solid #333;
+        }
+        #status { position: absolute; top: 20px; width: 100%; text-align: center; color: #0f0; font-size: 18px; }
+        #webcam-preview { position: absolute; top: 10px; right: 10px; width: 160px; height: 120px; opacity: 0.5; border: 1px solid #333; transform: scaleX(-1); }
+        #monitor { position: absolute; bottom: 40px; left: 10px; font-size: 11px; color: #666; background: rgba(0,0,0,0.5); padding: 5px; }
+    </style>
+</head>
+<body>
+
+    <video id="webcam-preview" autoplay playsinline></video>
+    <div id="target">☀️</div>
+    <div id="gaze-dot"></div>
+    <div id="stealth-hud"></div>
+    <div id="status">Starting Tracker...</div>
+    <div id="monitor">Features: --</div>
+
+    <script>
+        const video = document.getElementById('webcam-preview');
+        const target = document.getElementById('target');
+        const gazeDot = document.getElementById('gaze-dot');
+        const hud = document.getElementById('stealth-hud');
+        const status = document.getElementById('status');
+        const monitor = document.getElementById('monitor');
+
+        const POSITIONS = [
+            {x: 0.5, y: 0.5}, {x: 0.05, y: 0.05}, {x: 0.95, y: 0.05}, 
+            {x: 0.95, y: 0.95}, {x: 0.05, y: 0.95}, {x: 0.5, y: 0.1},
+            {x: 0.9, y: 0.5}, {x: 0.5, y: 0.9}, {x: 0.1, y: 0.5}
+        ];
+
+        let currentIdx = 0;
+        let isCalibrated = false;
+        let isCapturing = false;
+        let trainingData = { X: [], Y: [] };
+        let weights = null;
+        let currentFeatures = null;
+
+        // --- SMOOTHING STATE ---
+        let smoothX = 0.5;
+        let smoothY = 0.5;
+        const ALPHA_X = 0.15; // Faster for horizontal
+        const ALPHA_Y = 0.06; // Much slower for vertical jitter reduction
+
+        // --- MATH: Stable Pseudo-inverse Regression ---
+        function trainModel() {
+            if (trainingData.X.length < 10) return false;
+            try {
+                const X = trainingData.X;
+                const Y = trainingData.Y;
+                const X_bias = X.map(f => [1, ...f]);
+                
+                // Stable Solution using Pseudo-inverse (SVD based)
+                // W = pinv(X) * Y
+                const Xt_pinv = math.pinv(X_bias);
+                weights = math.multiply(Xt_pinv, Y);
+                
+                console.log("Model Weights:", weights);
+                return true;
+            } catch (e) {
+                console.error("Training Failed:", e);
+                return false;
+            }
+        }
+
+        function predict(f) {
+            if (!weights) return null;
+            const pred = math.multiply([1, ...f], weights);
+            return { x: pred[0], y: pred[1] };
+        }
+
+        // --- MEDIAPIPE ---
+        const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        
+        faceMesh.onResults(results => {
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                hud.style.backgroundColor = "#00ff00";
+                const lm = results.multiFaceLandmarks[0];
+                
+                const getV = (i, in_c, out_c) => {
+                    const cx = (lm[in_c].x + lm[out_c].x)/2;
+                    const cy = (lm[in_c].y + lm[out_c].y)/2;
+                    return [(lm[i].x - cx)*100, (lm[i].y - cy)*100];
+                };
+
+                const lv = getV(468, 133, 33);
+                const rv = getV(473, 362, 263);
+                const pose = [lm[1].x, lm[1].y, lm[1].z];
+                
+                currentFeatures = [...lv, ...rv, ...pose];
+                monitor.innerText = `L-Iris: ${lv[0].toFixed(2)}, ${lv[1].toFixed(2)} | Pose Z: ${pose[2].toFixed(2)}`;
+
+                if (isCalibrated) {
+                    const p = predict(currentFeatures);
+                    if (p && !isNaN(p.x)) {
+                        // Apply Asymmetric Smoothing
+                        smoothX += ALPHA_X * (p.x - smoothX);
+                        smoothY += ALPHA_Y * (p.y - smoothY);
+
+                        gazeDot.style.display = "block";
+                        const screenX = smoothX * window.innerWidth;
+                        const screenY = smoothY * window.innerHeight;
+                        
+                        gazeDot.style.left = `${screenX - 17}px`;
+                        gazeDot.style.top = `${screenY - 17}px`;
+                    }
+                }
+            } else {
+                hud.style.backgroundColor = "red";
+                currentFeatures = null;
+            }
+        });
+
+        const camera = new Camera(video, { onFrame: async () => { await faceMesh.send({image: video}); }, width: 640, height: 480 });
+        camera.start().then(() => { status.innerText = "READY: Tap SPACE to calibrate"; updateTarget(); });
+
+        function updateTarget() {
+            const p = POSITIONS[currentIdx];
+            target.style.left = `${p.x * window.innerWidth - 40}px`;
+            target.style.top = `${p.y * window.innerHeight - 40}px`;
+        }
+
+        window.onkeydown = (e) => {
+            if ((e.code === 'Space' || e.key === ' ') && !isCalibrated && !isCapturing) {
+                if (currentFeatures) captureBurst();
+            }
+        };
+
+        function captureBurst() {
+            isCapturing = true;
+            let count = 0;
+            const p = POSITIONS[currentIdx];
+            status.innerText = `Capturing... (${currentIdx + 1}/9)`;
+            
+            const interval = setInterval(() => {
+                if (currentFeatures) {
+                    trainingData.X.push([...currentFeatures]);
+                    trainingData.Y.push([p.x, p.y]);
+                    target.style.opacity = (count % 2 === 0) ? "0.2" : "1.0";
+                    count++;
+                }
+
+                if (count >= 20) {
+                    clearInterval(interval);
+                    isCapturing = false;
+                    target.style.opacity = "1.0";
+                    currentIdx++;
+                    if (currentIdx >= POSITIONS.length) {
+                        status.innerText = "Processing...";
+                        if (trainModel()) {
+                            isCalibrated = true;
+                            target.style.display = "none";
+                            status.innerText = "ACTIVE: Tracking eyes";
+                        } else {
+                            status.innerText = "Error. Refresh page.";
+                        }
+                    } else {
+                        updateTarget();
+                    }
+                }
+            }, 100);
+        }
+
+        function animate() {
+            target.style.transform = `scale(${1 + 0.1 * Math.sin(Date.now() * 0.005)})`;
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>

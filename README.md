@@ -1,96 +1,71 @@
-# 🐥 Baby Pitch Agency Experiment (v15_04)
+# 🐥 Baby Pitch Agency Experiment (v2.0 - Precision Edition)
 
-This project is a developmental psychology experiment designed for 18-month-old infants. It investigates Sense of Agency (SoA) by allowing infants to control a hot air balloon on screen using their vocal pitch.
+This is a developmental psychology experiment for 18-month-old infants investigating Sense of Agency (SoA) through vocal pitch control and gaze-contingent reveals.
 
-## 🌟 Key Features
-- **3-Phase Procedure**: Baseline, Exploration (Eraser mechanism), and Test (Eye-tracking reveal).
-- **Yoked System**: Automatically records and plays back trajectories across participants for control conditions (C1, C2, C3).
-- **Real-time Gaze Tracking**: Uses Mediapipe Face Mesh to detect infant focus on screen regions (ROIs).
-- **Automated Data Management**: A Python Flask backend silently saves CSV logs, JSON trajectories, and video recordings to local folders.
+## 👁 High-Precision Gaze Tracking
+The project now supports three advanced gaze tracking engines to maximize accuracy for infant research.
+
+### Option 1: MediaPipe 3D (Recommended)
+Best for handling infant head movements and 3D facial geometry.
+- **Run**: `python realtime_calibrated_gaze.py`
+- **Features**: 3D Eye-Socket vectors, Head Pose (Pitch/Yaw/Roll), and 3D Translation.
+- **Mapping**: Ridge Polynomial Regression (Degree 2).
+
+### Option 2: WebGazer (Web-Native)
+Best for quick, browser-only deployment without local Python scripts.
+- **Access**: `http://localhost:5001/precision`
+- **Features**: 3D Face Mesh integration + JavaScript-native Ridge Regression.
+- **Smoothing**: Asymmetric EMA filter (heavy vertical stabilization).
+
+### Option 3: Owlet (Dlib-Based)
+Best for high-contrast, sub-pixel pupil localization.
+- **Run**: `python owlet_precision_v2.py`
+- **Features**: Owlet pupil ratios + Dlib 3D Head Pose + solvePnP.
 
 ---
 
 ## 🛠 Setup & Installation
 
 ### 1. Prerequisites
-- Python 3.8 or higher.
-- A modern web browser (Chrome or Firefox recommended for MediaRecorder support).
-- A webcam and microphone.
+- Python 3.8+ and `ffmpeg` (for video conversion).
+- MediaPipe Model: `face_landmarker.task` (Included in root).
 
 ### 2. Environment Setup
-It is recommended to use a virtual environment:
-
 ```bash
-# Create a virtual environment
 python3 -m venv venv
-
-# Activate it (MacOS/Linux)
 source venv/bin/activate
-
-# Activate it (Windows)
-# venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
+./venv/bin/pip install dlib cmake joblib scikit-learn  # Precision dependencies
 ```
-
-### 3. Folder Structure
-Ensure the following folders exist (the server will create them automatically if missing):
-- `data/`: Stores CSV logs and video files.
-- `trajectories/`: Stores JSON trajectory files for yoked conditions.
-- `VocSoA/sounds/`: Place your experiment audio files (e.g., `cat_20.mp3`) here.
 
 ---
 
 ## 🚀 Running the Experiment
 
-### 1. Start the Local Server
-The server handles file saving and serves the experiment interface.
+### 1. Calibration (Stealth HUD)
+All trackers now use a **Stealth Calibration** protocol designed for infants:
+- **One-Tap Burst**: Press **Spacebar** once to capture 15 high-quality frames while the baby fixates on the sun.
+- **Stealth HUD**: A tiny status circle in the bottom-right corner (Green = Tracking, Red = Lost).
+- **Looming Stimulus**: Pulsing sun (☀️) on a dark background to prevent pupil constriction.
 
-```bash
-python server.py
-```
-By default, the server runs on `http://localhost:5001`.
-
-### 2. Access the Interface
-1. Open your browser and navigate to `http://localhost:5001`.
-2. Enter the **Participant Number** and select the **Group Assignment**.
-3. Toggle "Test eyetracking setup" if you need to calibrate the webcam.
-4. Click **Start Experiment**.
-
-### 3. Experiment Flow
-- **Baseline**: 5 vocalizations move the balloon before the trial starts.
-- **Exploration**: 30 trials (3 blocks of 10). The balloon reveals animals behind clouds when pitch is detected.
-- **Test Phase**: Looking at a cloud ROI reveals the animal using gaze-contingency.
+### 2. Main Experiment Loop
+1. Start server: `python server.py`
+2. Access interface: `http://localhost:5001/`
+3. Enter Participant ID and Group.
+4. Complete Calibration -> Baseline -> Exploration -> Test.
 
 ---
 
 ## 📊 Data Analysis
-
-Once you have collected data, use the provided analysis tools:
-
-### Option A: Python Script
-Run a quick summary of all files in the `data/` folder:
-```bash
-python analysis.py
-```
-
-### Option B: Jupyter Notebook
-For professional visualizations and condition comparisons:
-1. Launch Jupyter: `jupyter notebook`
-2. Open `experiment_analysis.ipynb`.
-3. Run all cells to generate Seaborn plots and detailed metrics.
+Recorded data is saved to `data/` with clean `.csv` extensions.
+- **Metrics**: Vocal duration, distance traveled, ROI reveal percentages, and 15-dimensional gaze feature vectors.
+- **Offline Validation**: Use `python test_gaze_pipeline.py` to overlay gaze tracking on recorded videos for verification.
 
 ---
 
 ## 📝 Configuration Note
-- **Conditions**: 
-    - **C1**: Full control (where/when).
-    - **C2**: Partial control (vocal triggers playback of a yoked trajectory).
-    - **C3**: No control (full yoked playback).
-- **Yoking Pool**: The first participant (ID: 1) is automatically assigned C1 for all blocks to seed the yoked trajectory pool.
+- **C1**: Full control.
+- **C2**: Partial control (vocal triggers playback).
+- **C3**: No control (full yoked playback).
 
----
-
-## 👥 Contributors
-Built for research in developmental psychology. Documentation and environment formalization by Gemini CLI.
+Documentation updated for Precision Phase (v2.0).

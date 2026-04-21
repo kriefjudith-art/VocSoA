@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Baby WebGazer - Ultimate Robust Edition</title>
+    <!-- Use JS Delivr for more reliable loading -->
+    <script src="https://cdn.jsdelivr.net/gh/brownhci/WebGazer/dist/webgazer.js"></script>
+    <style>
+        body {
+            margin: 0; padding: 0; overflow: hidden;
+            background-color: #050505;
+            font-family: 'Comic Sans MS', sans-serif;
+            cursor: crosshair;
+        }
+        #target {
+            position: absolute;
+            font-size: 100px;
+            z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            pointer-events: none;
+            color: #FFD700;
+        }
+        #stealth-hud {
+            position: absolute;
+            bottom: 10px; right: 10px;
+            width: 25px; height: 25px;
+            background-color: #ff0000;
+            border-radius: 50%;
+            z-index: 1000;
+            border: 3px solid white;
+        }
+        #gaze-dot {
+            position: absolute;
+            width: 40px; height: 40px;
+            background-color: #00FFFF; /* CYAN for high contrast */
+            border: 4px solid white;
+            border-radius: 50%;
+            display: none;
+            pointer-events: none;
+            z-index: 999;
+            box-shadow: 0 0 30px rgba(0,255,255,0.8);
+        }
+        #status-overlay {
+            position: absolute;
+            top: 50%; width: 100%;
+            text-align: center; color: white;
+            font-size: 24px; pointer-events: none;
+            transform: translateY(-50%);
+            background: rgba(0,0,0,0.5);
+            padding: 20px 0;
+            z-index: 2000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status-overlay">Click anywhere to start camera</div>
+    <div id="target">☀️</div>
+    <div id="stealth-hud"></div>
+    <div id="gaze-dot"></div>
+
+    <script>
+        const target = document.getElementById('target');
+        const hud = document.getElementById('stealth-hud');
+        const gazeDot = document.getElementById('gaze-dot');
+        const overlay = document.getElementById('status-overlay');
+
+        const TARGET_POSITIONS = [
+            {x: 0.5, y: 0.5}, {x: 0.1, y: 0.1}, {x: 0.9, y: 0.1}, 
+            {x: 0.9, y: 0.9}, {x: 0.1, y: 0.9}, {x: 0.5, y: 0.1},
+            {x: 0.9, y: 0.5}, {x: 0.5, y: 0.9}, {x: 0.1, y: 0.5}
+        ];
+
+        let currentIdx = 0;
+        let isCalibrated = false;
+        let isCapturing = false;
+        let framesCaptured = 0;
+        const FRAMES_PER_POINT = 12;
+
+        async function init() {
+            overlay.innerText = "Loading Tracker...";
+            
+            await webgazer.setRegression('ridge')
+                .setTracker('Tasmot') // High speed tracker
+                .setGazeListener((data, elapsed) => {
+                    if (!data) {
+                        hud.style.backgroundColor = "red";
+                        return;
+                    }
+                    hud.style.backgroundColor = "#00ff00"; // Tracking active
+                    
+                    if (isCalibrated) {
+                        gazeDot.style.left = `${data.x - 20}px`;
+                        gazeDot.style.top = `${data.y - 20}px`;
+                    }
+                })
+                .begin();
+
+            webgazer.showVideo(true).showPredictionPoints(false);
+            
+            // Reposition video preview
+            const timer = setInterval(() => {
+                const vid = document.getElementById('webgazerVideoContainer');
+                if (vid) {
+                    vid.style.top = '0px'; vid.style.right = '0px'; vid.style.left = 'auto';
+                    vid.style.width = '160px'; vid.style.height = '120px';
+                    clearInterval(timer);
+                }
+            }, 100);
+
+            overlay.style.display = "none";
+            updateTarget();
+        }
+
+        function updateTarget() {
+            const pos = TARGET_POSITIONS[currentIdx];
+            target.style.left = `${pos.x * window.innerWidth - 50}px`;
+            target.style.top = `${pos.y * window.innerHeight - 50}px`;
+        }
+
+        // Spacebar listener
+        window.onkeydown = (e) => {
+            if (e.code === 'Space' && !isCalibrated && !isCapturing) {
+                if (hud.style.backgroundColor === "red") {
+                    alert("Face not detected! Please center your face in the preview.");
+                    return;
+                }
+                capturePoint();
+            }
+        };
+
+        function capturePoint() {
+            isCapturing = true;
+            framesCaptured = 0;
+            const pos = TARGET_POSITIONS[currentIdx];
+            
+            const burst = setInterval(() => {
+                webgazer.recordScreenPosition(pos.x * window.innerWidth, pos.y * window.innerHeight, 'manual');
+                target.style.opacity = (framesCaptured % 2 === 0) ? "0.3" : "1.0";
+                
+                framesCaptured++;
+                if (framesCaptured >= FRAMES_PER_POINT) {
+                    clearInterval(burst);
+                    isCapturing = false;
+                    target.style.opacity = "1.0";
+                    currentIdx++;
+                    
+                    if (currentIdx >= TARGET_POSITIONS.length) {
+                        isCalibrated = true;
+                        target.style.display = "none";
+                        gazeDot.style.display = "block";
+                    } else {
+                        updateTarget();
+                    }
+                }
+            }, 150); // 1.8s capture total per point
+        }
+
+        // Animation
+        function animate() {
+            const scale = 1 + 0.2 * Math.sin(Date.now() * 0.005);
+            target.style.transform = `scale(${scale})`;
+            requestAnimationFrame(animate);
+        }
+
+        window.onclick = () => { if (overlay.innerText.includes("Click")) init(); };
+        animate();
+    </script>
+</body>
+</html>

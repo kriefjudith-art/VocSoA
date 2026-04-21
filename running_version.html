@@ -95,11 +95,19 @@
         let yokedTrajectoryData = null;
         let yokedIndex = 0;
         
-        const PHASES = { BASELINE: 'BASELINE', EXPLORATION: 'EXPLORATION', TEST: 'TEST' };
-        let currentPhase = PHASES.BASELINE;
+        const PHASES = { CALIBRATION: 'CALIBRATION', BASELINE: 'BASELINE', EXPLORATION: 'EXPLORATION', TEST: 'TEST' };
+        let currentPhase = PHASES.CALIBRATION;
         let experimentStarted = false;
         let isTestIntro = false;
         let testIntroAnimal = null;
+
+        // --- CALIBRATION SETTINGS ---
+        let calibrationStep = 0; // 0: Center, 1: Top-Left, 2: Bottom-Right
+        let isCalibratingPoint = false;
+        let calibFrameCount = 0;
+        const CALIB_FRAMES_NEEDED = 50;
+        let calibrationData = { center: [], tl: [], br: [] };
+        let calibOffsets = { minX: 0.35, maxX: 0.65, minY: 0.4, maxY: 0.6 }; 
         
         // --- IMPROVED PITCH SETTINGS ---
         const MIN_PITCH = 150; 
@@ -160,16 +168,90 @@
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
                 if (testEyetrackingCheckbox.checked) drawLandmarks(landmarks);
-                const leftIris = landmarks[468], leftInner = landmarks[133], leftOuter = landmarks[33], leftTop = landmarks[159], leftBottom = landmarks[145];
-                const x_ratio = (leftIris.x - leftOuter.x) / (leftInner.x - leftOuter.x);
-                const y_ratio = (leftIris.y - leftTop.y) / (leftBottom.y - leftTop.y);
-                const rawGazeX = ((x_ratio - 0.35) / 0.3) * canvas.width;
-                const rawGazeY = ((y_ratio - 0.4) / 0.2) * canvas.height;
+                
+                // --- BINOCULAR GAZE ESTIMATION ---
+                // Left Eye: Iris 468, Inner 133, Outer 33, Top 159, Bottom 145
+                // Right Eye: Iris 473, Inner 362, Outer 263, Top 386, Bottom 374
+                
+                // 1. Left Eye Ratios
+                const lx = (landmarks[468].x - landmarks[33].x) / (landmarks[133].x - landmarks[33].x);
+                const ly = (landmarks[468].y - landmarks[159].y) / (landmarks[145].y - landmarks[159].y);
+
+                // 2. Right Eye Ratios
+                const rx = (landmarks[473].x - landmarks[263].x) / (landmarks[362].x - landmarks[263].x);
+                const ry = (landmarks[473].y - landmarks[386].y) / (landmarks[374].y - landmarks[386].y);
+
+                // 3. Average Ratios (Binocular Fusion)
+                const avgX = (lx + rx) / 2;
+                const avgY = (ly + ry) / 2;
+
+                if (currentPhase === PHASES.CALIBRATION && isCalibratingPoint) {
+                    collectCalibration(avgX, avgY);
+                }
+
+                // 4. Map using calibrated offsets (with fallback to default spread)
+                const rangeX = calibOffsets.maxX - calibOffsets.minX || 0.3;
+                const rangeY = calibOffsets.maxY - calibOffsets.minY || 0.2;
+                
+                const rawGazeX = ((avgX - calibOffsets.minX) / rangeX) * canvas.width;
+                const rawGazeY = ((avgY - calibOffsets.minY) / rangeY) * canvas.height;
+
                 smoothedGazeX += GAZE_SMOOTHING * (rawGazeX - smoothedGazeX);
                 smoothedGazeY += GAZE_SMOOTHING * (rawGazeY - smoothedGazeY);
                 gazeX = smoothedGazeX; gazeY = smoothedGazeY;
                 updateGazeROI(gazeX, gazeY);
             }
+        }
+
+        function collectCalibration(x, y) {
+            calibFrameCount++;
+            if (calibrationStep === 0) calibrationData.center.push({x, y});
+            else if (calibrationStep === 1) calibrationData.tl.push({x, y});
+            else if (calibrationStep === 2) calibrationData.br.push({x, y});
+
+            if (calibFrameCount >= CALIB_FRAMES_NEEDED) {
+                isCalibratingPoint = false;
+                calibFrameCount = 0;
+                calibrationStep++;
+                if (calibrationStep > 2) finishCalibration();
+                else {
+                    setTimeout(() => { isCalibratingPoint = true; playSound('cat_20.mp3'); }, 1500);
+                }
+            }
+        }
+
+        function finishCalibration() {
+            const getMed = (arr, prop) => {
+                const values = arr.map(v => v[prop]).sort((a,b) => a-b);
+                return values[Math.floor(values.length / 2)];
+            };
+            
+            const tl = { x: getMed(calibrationData.tl, 'x'), y: getMed(calibrationData.tl, 'y') };
+            const br = { x: getMed(calibrationData.br, 'x'), y: getMed(calibrationData.br, 'y') };
+            const center = { x: getMed(calibrationData.center, 'x'), y: getMed(calibrationData.center, 'y') };
+
+            // We use the TL and BR to define the box, but we could also use center to verify
+            calibOffsets.minX = tl.x;
+            calibOffsets.maxX = br.x;
+            calibOffsets.minY = tl.y;
+            calibOffsets.maxY = br.y;
+
+            console.log("Calibration Finished:", calibOffsets);
+            currentPhase = PHASES.BASELINE;
+            playSound('cat_20.mp3'); 
+        }
+
+        function drawAttractor(ctx, x, y, size) {
+            const time = performance.now() * 0.005;
+            const bounce = Math.sin(time * 2) * 20;
+            ctx.save();
+            ctx.translate(x, y + bounce);
+            ctx.rotate(time);
+            ctx.font = `${size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('☀️', 0, 0);
+            ctx.restore();
         }
 
         function updateGazeROI(x, y) {
@@ -277,7 +359,10 @@
                 audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; microphone = audioContext.createMediaStreamSource(micStream); microphone.connect(analyser);
                 uiContainer.style.display = 'none'; stopButton.style.display = 'block';
                 await initEyeTracking();
-                balloon.x = 100; balloon.y = canvas.height / 2; currentPhase = PHASES.BASELINE; experimentStarted = true;
+                balloon.x = 100; balloon.y = canvas.height / 2; 
+                currentPhase = PHASES.CALIBRATION; 
+                calibrationStep = 0; isCalibratingPoint = true;
+                experimentStarted = true;
                 startTime = performance.now(); trialStartTime = startTime;
                 startRecording(micStream); drawLoop();
             } catch (err) { console.error(err); alert('Permissions denied.'); }
@@ -311,6 +396,22 @@
         function drawLoop() {
             if (!experimentStarted) return;
             requestAnimationFrame(drawLoop);
+
+            // --- CALIBRATION OVERLAY ---
+            if (currentPhase === PHASES.CALIBRATION) {
+                ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                let targetX = canvas.width/2, targetY = canvas.height/2;
+                if (calibrationStep === 1) { targetX = 150; targetY = 150; }
+                else if (calibrationStep === 2) { targetX = canvas.width - 150; targetY = canvas.height - 150; }
+                
+                drawAttractor(ctx, targetX, targetY, isCalibratingPoint ? 180 : 80);
+                
+                ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = 'bold 40px Arial';
+                ctx.fillText("Look at the sun! ☀️", canvas.width/2, canvas.height - 100);
+                
+                // Still update data collection via onFaceMeshResults
+                return; 
+            }
             const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
             let sum = 0; for(let i=0; i<buffer.length; i++) sum += buffer[i]*buffer[i];
             const rms = Math.sqrt(sum/buffer.length);
