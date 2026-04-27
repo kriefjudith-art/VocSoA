@@ -4,77 +4,57 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Baby Pitch Agency - Research Edition (v15_04)</title>
-    <!-- MediaPipe Face Mesh -->
+    <!-- MediaPipe Face Mesh (DISABLED for v2.0)
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <style>
-        body {
-            margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-            height: 100vh; background-color: #87CEEB; font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; overflow: hidden;
-        }
-        #ui-container {
-            position: absolute; z-index: 100; text-align: center; background: rgba(255, 255, 255, 0.95);
-            padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-width: 400px;
-        }
-        h1 { color: #FF4500; margin-top: 0; font-size: 28px; }
-        .input-group { margin-bottom: 15px; text-align: left; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; font-size: 16px; }
-        button {
-            width: 100%; padding: 15px; font-size: 20px; font-weight: bold; cursor: pointer; background-color: #FF1493;
-            color: white; border: none; border-radius: 50px; transition: transform 0.2s, background-color 0.2s;
-            box-shadow: 0 6px 0 #C71585; margin-top: 10px;
-        }
-        button:active { transform: translateY(6px); box-shadow: 0 0 0 #C71585; }
-        #stopButton {
-            position: absolute; top: 20px; right: 20px; width: auto; padding: 10px 20px;
-            background-color: #FF4500; box-shadow: 0 4px 0 #B22222; display: none; z-index: 100;
-        }
-        canvas { display: block; width: 100vw; height: 100vh; }
-        #webcam-container {
-            position: absolute; bottom: 20px; left: 20px; width: 240px; height: 180px; display: none; z-index: 50; border: 4px solid white; border-radius: 10px; overflow: hidden;
-        }
-    </style>
+    -->
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+
+    <div id="pitch-hud" style="display: none;">
+        <div class="hud-line">Pitch: <span id="hud-pitch">--</span> Hz</div>
+        <div class="hud-line">Volume: <span id="hud-vol">--</span></div>
+        <div class="hud-line">Aperiodicity: <span id="hud-ap">--</span></div>
+        <div class="hud-line" id="hud-status">Status: Silent</div>
+        <div class="hud-error" id="hud-error"></div>
+    </div>
 </head>
 <body>
 
     <div id="ui-container">
         <h1>🐥 Baby Agency Study</h1>
+        <div id="init-status" style="margin-bottom: 15px; font-weight: bold; color: #C71585;">Detecting next participant...</div>
         <div class="input-group">
-            <label for="participantId">Participant Number:</label>
-            <input type="text" id="participantId" placeholder="e.g. 001">
+            <label for="participantId">Participant ID:</label>
+            <input type="text" id="participantId" readonly style="background: #f0f0f0;">
         </div>
         <div class="input-group">
-            <label for="groupAssignment">Group Assignment:</label>
-            <select id="groupAssignment">
-                <option value="G1">G1: C1 -> C2 -> C1</option>
-                <option value="G2">G2: C2 -> C1 -> C2</option>
-                <option value="G3">G3: C3 (Yoked Only)</option>
-            </select>
+            <label for="groupAssignment">Assigned Group:</label>
+            <input type="text" id="groupAssignment" readonly style="background: #f0f0f0;">
         </div>
-        <button id="startButton">Start Experiment</button>
-        <div class="input-group" style="margin-top: 20px; display: flex; align-items: center; justify-content: center;">
-            <input type="checkbox" id="testEyetracking" style="width: 20px; margin-right: 10px;">
-            <label for="testEyetracking" style="margin-bottom: 0;">Test eyetracking setup</label>
-        </div>
+        <div id="yoke-warning" style="margin-bottom: 15px; color: #FF4500; font-size: 14px; display: none;">⚠️ Missing yoked trajectories for this group.</div>
+        <button id="startButton" disabled>Loading...</button>
     </div>
 
     <button id="stopButton">Stop & Save Data</button>
+    <!-- Webcam container disabled for v2.0
     <div id="webcam-container">
         <video id="webcam-preview" autoplay playsinline muted style="display: none;"></video>
         <canvas id="webcam-canvas" width="240" height="180" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
     </div>
+    -->
     <canvas id="visualizer"></canvas>
 
     <script>
         const startButton = document.getElementById('startButton');
         const stopButton = document.getElementById('stopButton');
         const uiContainer = document.getElementById('ui-container');
-        const webcamPreview = document.getElementById('webcam-preview');
-        const webcamCanvas = document.getElementById('webcam-canvas');
-        const webcamCtx = webcamCanvas.getContext('2d');
-        const webcamContainer = document.getElementById('webcam-container');
-        const testEyetrackingCheckbox = document.getElementById('testEyetracking');
+        // const webcamPreview = document.getElementById('webcam-preview');
+        // const webcamCanvas = document.getElementById('webcam-canvas');
+        // const webcamCtx = webcamCanvas.getContext('2d');
+        // const webcamContainer = document.getElementById('webcam-container');
+        // const testEyetrackingCheckbox = document.getElementById('testEyetracking');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
 
@@ -98,20 +78,42 @@
         const PHASES = { CALIBRATION: 'CALIBRATION', BASELINE: 'BASELINE', EXPLORATION: 'EXPLORATION', TEST: 'TEST' };
         let currentPhase = PHASES.CALIBRATION;
         let experimentStarted = false;
+        let isTestPhase = false; // New flag for the 2s post-trial test
+        let testPhaseStartTime = 0;
+        
+        // --- AUTO-INITIALIZATION ---
+        async function initSession() {
+            const statusEl = document.getElementById('init-status');
+            const startBtn = document.getElementById('startButton');
+            try {
+                const res = await fetch('/api/init_participant');
+                const data = await res.json();
+                
+                participantId = data.participant_id;
+                groupAssignment = data.group;
+                
+                document.getElementById('participantId').value = participantId;
+                document.getElementById('groupAssignment').value = groupAssignment;
+                
+                if (!data.yoked_available && groupAssignment !== 'SEED') {
+                    document.getElementById('yoke-warning').style.display = 'block';
+                } else {
+                    startBtn.disabled = false;
+                    startBtn.innerText = "Start Experiment";
+                }
+                statusEl.innerText = "Ready to start.";
+            } catch (err) {
+                console.error(err);
+                statusEl.innerText = "Error connecting to server.";
+            }
+        }
+        window.addEventListener('load', initSession);
         let isTestIntro = false;
         let testIntroAnimal = null;
 
-        // --- CALIBRATION SETTINGS ---
-        let calibrationStep = 0; // 0: Center, 1: Top-Left, 2: Bottom-Right
-        let isCalibratingPoint = false;
-        let calibFrameCount = 0;
-        const CALIB_FRAMES_NEEDED = 50;
-        let calibrationData = { center: [], tl: [], br: [] };
-        let calibOffsets = { minX: 0.35, maxX: 0.65, minY: 0.4, maxY: 0.6 }; 
-        
         // --- IMPROVED PITCH SETTINGS ---
-        const MIN_PITCH = 150; 
-        const MAX_PITCH = 600; 
+        const MIN_PITCH = 220; 
+        const MAX_PITCH = 1500; 
         const APERIODICITY_THRESHOLD = 0.2; 
         const VOLUME_THRESHOLD = 0.01; 
         let pitchHistory = []; 
@@ -141,12 +143,13 @@
         let clouds = [];
         let isMovingForwards = true;
 
-        // --- EYE TRACKING ---
+        // --- EYE TRACKING (DISABLED) ---
         let gazeX = 0, gazeY = 0, gazeROI = null;
         let smoothedGazeX = canvas.width / 2, smoothedGazeY = canvas.height / 2;
         const GAZE_SMOOTHING = 0.12; 
         let faceMesh;
 
+        /*
         async function initEyeTracking() {
             faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
             faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
@@ -154,53 +157,10 @@
             const camera = new Camera(webcamPreview, { onFrame: async () => await faceMesh.send({image: webcamPreview}), width: 640, height: 480 });
             camera.start();
         }
-
-        function drawLandmarks(landmarks) {
-            webcamCtx.save();
-            webcamCtx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
-            webcamCtx.drawImage(webcamPreview, 0, 0, webcamCanvas.width, webcamCanvas.height);
-            webcamCtx.fillStyle = '#00FF00';
-            for (const point of landmarks) { webcamCtx.beginPath(); webcamCtx.arc(point.x * webcamCanvas.width, point.y * webcamCanvas.height, 1, 0, Math.PI * 2); webcamCtx.fill(); }
-            webcamCtx.restore();
-        }
+        */
 
         function onFaceMeshResults(results) {
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-                if (testEyetrackingCheckbox.checked) drawLandmarks(landmarks);
-                
-                // --- BINOCULAR GAZE ESTIMATION ---
-                // Left Eye: Iris 468, Inner 133, Outer 33, Top 159, Bottom 145
-                // Right Eye: Iris 473, Inner 362, Outer 263, Top 386, Bottom 374
-                
-                // 1. Left Eye Ratios
-                const lx = (landmarks[468].x - landmarks[33].x) / (landmarks[133].x - landmarks[33].x);
-                const ly = (landmarks[468].y - landmarks[159].y) / (landmarks[145].y - landmarks[159].y);
-
-                // 2. Right Eye Ratios
-                const rx = (landmarks[473].x - landmarks[263].x) / (landmarks[362].x - landmarks[263].x);
-                const ry = (landmarks[473].y - landmarks[386].y) / (landmarks[374].y - landmarks[386].y);
-
-                // 3. Average Ratios (Binocular Fusion)
-                const avgX = (lx + rx) / 2;
-                const avgY = (ly + ry) / 2;
-
-                if (currentPhase === PHASES.CALIBRATION && isCalibratingPoint) {
-                    collectCalibration(avgX, avgY);
-                }
-
-                // 4. Map using calibrated offsets (with fallback to default spread)
-                const rangeX = calibOffsets.maxX - calibOffsets.minX || 0.3;
-                const rangeY = calibOffsets.maxY - calibOffsets.minY || 0.2;
-                
-                const rawGazeX = ((avgX - calibOffsets.minX) / rangeX) * canvas.width;
-                const rawGazeY = ((avgY - calibOffsets.minY) / rangeY) * canvas.height;
-
-                smoothedGazeX += GAZE_SMOOTHING * (rawGazeX - smoothedGazeX);
-                smoothedGazeY += GAZE_SMOOTHING * (rawGazeY - smoothedGazeY);
-                gazeX = smoothedGazeX; gazeY = smoothedGazeY;
-                updateGazeROI(gazeX, gazeY);
-            }
+            // Disabled for v2.0
         }
 
         function collectCalibration(x, y) {
@@ -273,26 +233,40 @@
             const relY = (isGaze ? gazeY : balloon.y) - cloud.y;
             maskCtx.arc(relX, relY, revealRadius, 0, Math.PI * 2);
             maskCtx.fill();
-            if (!cloud.soundPlayed) {
-                const pixels = maskCtx.getImageData(0, 0, cloud.width, cloud.height).data;
-                let transparent = 0;
-                for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] < 128) transparent++; }
-                cloud.revealedPercent = (transparent / (cloud.width * cloud.height)) * 100;
-                if (cloud.revealedPercent >= 50) {
-                    setTimeout(() => { if (!cloud.soundPlayed) { playSound(cloud.animal.sound); cloud.soundPlayed = true; } }, 200);
+            
+            // Sound logic with 200ms delay and cooldown
+            const now = performance.now();
+            if (!cloud.lastPlayed || now - cloud.lastPlayed > 2000) { // 2s cooldown
+                if (!cloud.pendingSound) {
+                    cloud.pendingSound = true;
+                    setTimeout(() => {
+                        playSound(cloud.animal.sound);
+                        cloud.lastPlayed = performance.now();
+                        cloud.pendingSound = false;
+                    }, 200);
                 }
             }
         }
 
         function playSound(soundFile) { 
+            const errorEl = document.getElementById('hud-error');
             // Try specific VocSoA route first, then fallback to general sounds
             const audio = new Audio(`/VocSoA/sounds/${soundFile}`);
             audio.onerror = () => {
-                new Audio(`/sounds/${soundFile}`).play().catch(e => console.error("Sound play failed:", e));
+                const fallback = new Audio(`/sounds/${soundFile}`);
+                fallback.onerror = () => {
+                    errorEl.innerText = `Sound error: ${soundFile} not found.`;
+                    console.error("Sound play failed:", soundFile);
+                };
+                fallback.play().catch(e => {
+                    errorEl.innerText = `Sound error: ${soundFile} failed to play.`;
+                });
             };
             audio.play().catch(e => {
-                // If it fails immediately (e.g. 404), try fallback
-                new Audio(`/sounds/${soundFile}`).play().catch(err => console.error("Sound play failed:", err));
+                const fallback = new Audio(`/sounds/${soundFile}`);
+                fallback.play().catch(err => {
+                    errorEl.innerText = `Sound error: ${soundFile} not found.`;
+                });
             });
         }
 
@@ -359,19 +333,22 @@
         }
 
         startButton.addEventListener('click', async () => {
-            participantId = document.getElementById('participantId').value || "test";
-            groupAssignment = document.getElementById('groupAssignment').value;
-            blockNumber = 1; trialNumber = 1; currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
+            // Values are already set by initSession()
+            blockNumber = 1; trialNumber = 1; 
+            currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
+            
             if (audioContext) return; 
             try {
-                micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }, video: { width: 640, height: 480 } });
-                webcamPreview.srcObject = micStream; if (testEyetrackingCheckbox.checked) webcamContainer.style.display = 'block';
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false } });
+                
+                // Show pitch HUD
+                document.getElementById('pitch-hud').style.display = 'block';
+
                 audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; microphone = audioContext.createMediaStreamSource(micStream); microphone.connect(analyser);
                 uiContainer.style.display = 'none'; stopButton.style.display = 'block';
-                await initEyeTracking();
+                
                 balloon.x = 100; balloon.y = canvas.height / 2; 
-                currentPhase = PHASES.CALIBRATION; 
-                calibrationStep = 0; isCalibratingPoint = true;
+                currentPhase = PHASES.BASELINE; 
                 experimentStarted = true;
                 startTime = performance.now(); trialStartTime = startTime;
                 startRecording(micStream); drawLoop();
@@ -381,11 +358,12 @@
         stopButton.addEventListener('click', async () => { await stopExperiment(); });
         async function stopExperiment() { if (!experimentStarted) return; experimentStarted = false; await saveTrialData(true); alert("Experiment Finished."); location.reload(); }
 
-        function startTestPhase() {
-            currentPhase = PHASES.TEST; isTestIntro = true;
-            testIntroAnimal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
-            playSound(testIntroAnimal.sound);
-            setTimeout(() => { isTestIntro = false; initClouds(); }, 3000);
+        // --- CONDITION LOGIC ---
+        function determineCondition(group, block, p_id) {
+            if (p_id === '1' || p_id === 1 || group === 'SEED') return 'C1';
+            if (group === 'G1') return block === 2 ? 'C2' : 'C1';
+            if (group === 'G2') return block === 2 ? 'C1' : 'C2';
+            return 'C1';
         }
 
         async function fetchYokedTrajectory() {
@@ -403,70 +381,214 @@
             if (tauEstimate === -1) return { pitch: -1, aperiodicity: 1.0 }; return { pitch: sampleRate / tauEstimate, aperiodicity: aperiodicity };
         }
 
+        function updatePitchHUD(pitch, rms, aperiodicity, isVocalizing, reason = "") {
+            const hudPitch = document.getElementById('hud-pitch');
+            const hudVol = document.getElementById('hud-vol');
+            const hudAp = document.getElementById('hud-ap');
+            const hudStatus = document.getElementById('hud-status');
+            const hudErr = document.getElementById('hud-error');
+
+            hudPitch.innerText = pitch > 0 ? pitch.toFixed(0) : "--";
+            hudVol.innerText = rms.toFixed(4);
+            hudAp.innerText = aperiodicity.toFixed(3);
+            
+            if (isVocalizing) {
+                hudStatus.innerText = "Status: VOCALIZING";
+                hudStatus.style.color = "#00FF00";
+                hudErr.innerText = "";
+            } else {
+                hudStatus.innerText = "Status: Silent/Filtered";
+                hudStatus.style.color = "white";
+                hudErr.innerText = reason;
+            }
+
+            // Highlight errors in red
+            hudPitch.style.color = (pitch > 0 && (pitch < MIN_PITCH || pitch > MAX_PITCH)) ? "#FF4444" : "white";
+            hudVol.style.color = (rms < VOLUME_THRESHOLD) ? "#FF4444" : "white";
+            hudAp.style.color = (aperiodicity > APERIODICITY_THRESHOLD) ? "#FF4444" : "white";
+        }
+
+        let lastPitchForContour = -1;
+        let cloudTimers = {}; // To handle the 200ms delay
+
         function drawLoop() {
             if (!experimentStarted) return;
             requestAnimationFrame(drawLoop);
 
-            // --- CALIBRATION OVERLAY ---
-            if (currentPhase === PHASES.CALIBRATION) {
-                ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-                let targetX = canvas.width/2, targetY = canvas.height/2;
-                if (calibrationStep === 1) { targetX = 150; targetY = 150; }
-                else if (calibrationStep === 2) { targetX = canvas.width - 150; targetY = canvas.height - 150; }
-                
-                drawAttractor(ctx, targetX, targetY, isCalibratingPoint ? 180 : 80);
-                
-                ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = 'bold 40px Arial';
-                ctx.fillText("Look at the sun! ☀️", canvas.width/2, canvas.height - 100);
-                
-                // Still update data collection via onFaceMeshResults
-                return; 
+            const now = performance.now();
+            
+            // --- TEST PHASE (2s after each trial) ---
+            if (isTestPhase) {
+                if (now - testPhaseStartTime > 2000) {
+                    isTestPhase = false;
+                    // Reset for next trial
+                    trialNumber++;
+                    if (trialNumber > 10) {
+                        blockNumber++;
+                        trialNumber = 1;
+                    }
+                    if (blockNumber > 3) {
+                        stopExperiment();
+                        return;
+                    }
+                    currentCondition = determineCondition(groupAssignment, blockNumber, participantId);
+                    isMovingForwards = true;
+                    vocalizationCount = 0;
+                    trialStartTime = now;
+                    initClouds(); 
+                    if (currentCondition !== "C1") fetchYokedTrajectory();
+                } else {
+                    // Show test phase visuals
+                    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = '40px Arial';
+                    ctx.fillText("TEST PHASE", canvas.width/2, canvas.height/2);
+                    return; 
+                }
             }
-            const buffer = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(buffer);
+
+            const buffer = new Float32Array(analyser.fftSize); 
+            analyser.getFloatTimeDomainData(buffer);
             let sum = 0; for(let i=0; i<buffer.length; i++) sum += buffer[i]*buffer[i];
             const rms = Math.sqrt(sum/buffer.length);
             const result = yinAlgorithm(buffer, audioContext.sampleRate);
-            let isVocalizing = false; let now = performance.now();
-            if (rms > VOLUME_THRESHOLD && result.pitch >= MIN_PITCH && result.pitch <= MAX_PITCH && result.aperiodicity < APERIODICITY_THRESHOLD) {
-                pitchHistory.push(result.pitch); if (pitchHistory.length > 5) pitchHistory.shift();
+            
+            let isVocalizing = false;
+            let filterReason = "";
+
+            if (rms < VOLUME_THRESHOLD) filterReason = "Volume too low";
+            else if (result.pitch < MIN_PITCH || result.pitch > MAX_PITCH) filterReason = "Pitch out of range";
+            else if (result.aperiodicity > APERIODICITY_THRESHOLD) filterReason = "Aperiodicity too high";
+            else {
+                isVocalizing = true;
+                pitchHistory.push(result.pitch);
+                if (pitchHistory.length > 5) pitchHistory.shift();
                 const sorted = [...pitchHistory].sort((a,b) => a-b);
-                currentPitch = sorted[Math.floor(sorted.length/2)]; currentHarmonicity = 1.0 - result.aperiodicity; isVocalizing = true; lastVocalTime = now;
+                currentPitch = sorted[Math.floor(sorted.length/2)];
+                currentHarmonicity = 1.0 - result.aperiodicity;
+                lastVocalTime = now;
             }
-            if (isVocalizing && !lastIsVocalizing) { vocalizationCount++; if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) { currentPhase = PHASES.EXPLORATION; initClouds(); if (currentCondition !== "C1") fetchYokedTrajectory(); } }
+
+            updatePitchHUD(result.pitch, rms, result.aperiodicity, isVocalizing, filterReason);
+
+            if (isVocalizing && !lastIsVocalizing) {
+                vocalizationCount++;
+                if (currentPhase === PHASES.BASELINE && vocalizationCount >= 5) {
+                    currentPhase = PHASES.EXPLORATION;
+                    initClouds();
+                    if (currentCondition !== "C1") fetchYokedTrajectory();
+                }
+            }
             lastIsVocalizing = isVocalizing;
-            let timeSinceVocal = now - lastVocalTime; let moving = false;
+
+            let timeSinceVocal = now - lastVocalTime;
+            let moving = false;
+
             if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.BASELINE) {
                 if (currentCondition === "C1" || currentPhase === PHASES.BASELINE) {
                     if (isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
-                        moving = true; const padding = 60; let norm = (currentPitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH);
-                        let tY = (canvas.height - padding * 2) * (1 - Math.max(0, Math.min(1, norm))) + padding;
-                        balloon.vy = (tY - balloon.y) * 0.15;
-                    } else { balloon.vy *= 0.9; }
+                        moving = true;
+                        // Vertical movement based on contour
+                        if (lastPitchForContour > 0 && currentPitch > 0) {
+                            const diff = currentPitch - lastPitchForContour;
+                            balloon.vy = -diff * 0.5; // Up if pitch increases
+                        }
+                        lastPitchForContour = currentPitch;
+                        
+                        // Advance slowly
+                        balloon.vx = isMovingForwards ? 2 : -2;
+                    } else {
+                        balloon.vx = 0;
+                        balloon.vy *= 0.9; // Friction
+                        lastPitchForContour = -1;
+                    }
                 } else if ((currentCondition === "C2" || currentCondition === "C3") && yokedTrajectoryData) {
-                    if (currentCondition === "C3" || isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) { moving = true; const d = yokedTrajectoryData[yokedIndex]; balloon.x = d.balloon_x; balloon.y = d.balloon_y; yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1); }
+                    // Yoked playback
+                    if (currentCondition === "C3" || isVocalizing || timeSinceVocal < MOVEMENT_INERTIA_MS) {
+                        moving = true;
+                        const d = yokedTrajectoryData[yokedIndex];
+                        balloon.x = d.balloon_x;
+                        balloon.y = d.balloon_y;
+                        yokedIndex = Math.min(yokedTrajectoryData.length - 1, yokedIndex + 1);
+                    }
                 }
             }
-            if (moving && currentPhase !== PHASES.TEST && (currentCondition === "C1" || currentPhase === PHASES.BASELINE)) {
-                balloon.vx = isMovingForwards ? 4 : -4; balloon.x += balloon.vx; balloon.y += balloon.vy;
-                const padding = 50; balloon.x = Math.max(padding, Math.min(canvas.width - padding, balloon.x)); balloon.y = Math.max(padding, Math.min(canvas.height - padding, balloon.y));
-                if (balloon.x >= canvas.width - padding) isMovingForwards = false;
-                if (!isMovingForwards && balloon.x <= padding) {
-                    saveTrialData().then(() => { trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; } if (blockNumber > 3) startTestPhase(); else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); } });
+
+            if (moving && !isTestPhase && (currentCondition === "C1" || currentPhase === PHASES.BASELINE)) {
+                balloon.x += balloon.vx;
+                balloon.y += balloon.vy;
+                const padding = 60;
+                balloon.x = Math.max(padding, Math.min(canvas.width - padding, balloon.x));
+                balloon.y = Math.max(padding, Math.min(canvas.height - padding, balloon.y));
+                
+                if (isMovingForwards && balloon.x >= canvas.width - padding) {
+                    isMovingForwards = false;
+                } else if (!isMovingForwards && balloon.x <= padding) {
+                    // Trial Complete
+                    saveTrialData().then(() => {
+                        isTestPhase = true;
+                        testPhaseStartTime = performance.now();
+                        yokedIndex = 0;
+                    });
                 }
             } else if (moving && (currentCondition === "C2" || currentCondition === "C3")) {
-                if (yokedIndex >= yokedTrajectoryData.length - 1) { saveTrialData().then(() => { trialNumber++; if (trialNumber > 10) { blockNumber++; trialNumber = 1; } if (blockNumber > 3) startTestPhase(); else { currentCondition = determineCondition(groupAssignment, blockNumber, participantId); isMovingForwards = true; balloon.x = 100; trialStartTime = performance.now(); if (currentCondition !== "C1") fetchYokedTrajectory(); } }); }
+                if (yokedIndex >= yokedTrajectoryData.length - 1) {
+                    saveTrialData().then(() => {
+                        isTestPhase = true;
+                        testPhaseStartTime = performance.now();
+                        yokedIndex = 0;
+                    });
+                }
             }
+
+            // Cloud Overlap with 200ms delay
             let activeRevealId = null, activeRevealPct = 0;
-            if (currentPhase === PHASES.EXPLORATION) { clouds.forEach(cloud => { let dist = Math.sqrt((balloon.x - (cloud.x + cloud.width/2))**2 + (balloon.y - (cloud.y + cloud.height/2))**2); if (dist < 120) { revealCloud(cloud); activeRevealId = cloud.id; activeRevealPct = cloud.revealedPercent; } }); }
-            timeSeriesData.push({ t_absolute: (now - startTime).toFixed(2), t_elapsed: (now - trialStartTime).toFixed(2), p: currentPitch.toFixed(2), h: currentHarmonicity.toFixed(4), bx: balloon.x.toFixed(2), by: balloon.y.toFixed(2), bvx: balloon.vx.toFixed(2), bvy: balloon.vy.toFixed(2), v: isVocalizing ? "True" : "False", gx: gazeX.toFixed(2), gy: gazeY.toFixed(2), groi: gazeROI === null ? "null" : gazeROI, reveal_id: activeRevealId === null ? "null" : activeRevealId, reveal_pct: activeRevealPct.toFixed(2), phase: currentPhase });
+            if (currentPhase === PHASES.EXPLORATION) {
+                clouds.forEach(cloud => {
+                    let dist = Math.sqrt((balloon.x - (cloud.x + cloud.width/2))**2 + (balloon.y - (cloud.y + cloud.height/2))**2);
+                    if (dist < 130) {
+                        if (!cloudTimers[cloud.id]) {
+                            cloudTimers[cloud.id] = setTimeout(() => {
+                                revealCloud(cloud);
+                                delete cloudTimers[cloud.id];
+                            }, 200);
+                        }
+                        activeRevealId = cloud.id;
+                        activeRevealPct = cloud.revealedPercent;
+                    } else {
+                        if (cloudTimers[cloud.id]) {
+                            clearTimeout(cloudTimers[cloud.id]);
+                            delete cloudTimers[cloud.id];
+                        }
+                    }
+                });
+            }
+
+            timeSeriesData.push({ t_absolute: (now - startTime).toFixed(2), t_elapsed: (now - trialStartTime).toFixed(2), p: currentPitch.toFixed(2), h: currentHarmonicity.toFixed(4), bx: balloon.x.toFixed(2), by: balloon.y.toFixed(2), bvx: balloon.vx.toFixed(2), bvy: balloon.vy.toFixed(2), v: isVocalizing ? "True" : "False", gx: 0, gy: 0, groi: "null", reveal_id: activeRevealId === null ? "null" : activeRevealId, reveal_pct: activeRevealPct.toFixed(2), phase: currentPhase });
             if (currentCondition === "C1") trialTrajectoryToSave.push({timestamp_ms: now - trialStartTime, balloon_x: balloon.x, balloon_y: balloon.y});
+
+            // --- RENDERING ---
             ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            if (isTestIntro && testIntroAnimal) { ctx.font = '120px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(testIntroAnimal.emoji, canvas.width/2, canvas.height/2); }
-            else if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.TEST) { clouds.forEach(cloud => { ctx.font = '80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(cloud.animal.emoji, cloud.x + cloud.width/2, cloud.y + cloud.height/2); ctx.drawImage(cloud.maskCanvas, cloud.x, cloud.y); }); }
+            
+            if (currentPhase === PHASES.EXPLORATION || currentPhase === PHASES.TEST) {
+                clouds.forEach(cloud => {
+                    ctx.font = '80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillText(cloud.animal.emoji, cloud.x + cloud.width/2, cloud.y + cloud.height/2);
+                    ctx.drawImage(cloud.maskCanvas, cloud.x, cloud.y);
+                });
+            }
             drawHotAirBalloon(ctx, balloon.x, balloon.y, 0);
-            if (testEyetrackingCheckbox.checked) { ctx.fillStyle = 'red'; ctx.beginPath(); ctx.arc(gazeX, gazeY, 10, 0, Math.PI * 2); ctx.fill(); }
-            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = '20px Arial'; ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30); ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
+
+            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = '20px Arial';
+            ctx.fillText(`Phase: ${currentPhase} | Trial: ${trialNumber}/10 | Block: ${blockNumber}/3`, 20, 30);
+            ctx.fillText(`Condition: ${currentCondition} | Vocals: ${vocalizationCount}`, 20, 60);
         }
+
+        // Escape to terminate
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                stopExperiment();
+            }
+        });
     </script>
 </body>
 </html>
